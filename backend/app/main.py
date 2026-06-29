@@ -36,6 +36,14 @@ class CrackRequest(BaseModel):
         None,
         description="Hash algorithm (e.g. 'md5'). Auto-detected from length if omitted.",
     )
+    use_rules: bool = Field(
+        True,
+        description="Apply mutation rules (capitalization, numbers, leet) to base words.",
+    )
+    extra_words: list[str] = Field(
+        default_factory=list,
+        description="Extra seed words (e.g. a name) to mutate, like 'mors' -> 'Mors123'.",
+    )
 
 
 class CrackResponse(BaseModel):
@@ -64,7 +72,12 @@ def algorithms() -> dict[str, list[str]]:
 def crack(req: CrackRequest) -> CrackResponse:
     """Attempt to recover the plaintext behind a hash using the wordlist."""
     try:
-        result = cracker.crack(req.hash, algorithm=req.algorithm)
+        result = cracker.crack(
+            req.hash,
+            algorithm=req.algorithm,
+            use_rules=req.use_rules,
+            extra_words=req.extra_words,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

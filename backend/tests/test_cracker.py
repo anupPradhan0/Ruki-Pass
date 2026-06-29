@@ -56,3 +56,35 @@ def test_registry_lengths():
 def test_default_wordlist_exists():
     # Either rockyou.txt (if fetched) or common.txt must be available.
     assert cracker.default_wordlist().exists()
+
+
+def test_mutations_generate_expected_variants():
+    from app import mutations
+
+    variants = set(mutations.mutate("mors"))
+    assert "Mors123" in variants  # capitalize + append
+    assert "MORS" in variants  # uppercase
+    assert "M0r$" in variants  # leet (o -> 0, s -> $)
+
+
+def test_crack_custom_word_with_rules():
+    # "Mors123" isn't in any wordlist, but rules build it from the seed "mors".
+    target = hashlib.md5(b"Mors123").hexdigest()
+    result = cracker.crack(
+        target, algorithm="md5", extra_words=["mors"], wordlist=None
+    )
+    assert result.found
+    assert result.password == "Mors123"
+
+
+def test_rules_off_skips_mutations():
+    target = hashlib.md5(b"Mors123").hexdigest()
+    # With rules off and the seed only tried verbatim, "Mors123" won't be built.
+    result = cracker.crack(
+        target,
+        algorithm="md5",
+        use_rules=False,
+        extra_words=["mors"],
+        wordlist=["mors", "other"],
+    )
+    assert not result.found

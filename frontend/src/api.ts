@@ -12,14 +12,26 @@ export type CrackResponse = {
   wordlist: string | null
 }
 
+export type CrackOptions = {
+  algorithm?: string
+  useRules?: boolean
+  extraWords?: string[]
+}
+
 export async function crackHash(
   hash: string,
-  algorithm?: string,
+  options: CrackOptions = {},
 ): Promise<CrackResponse> {
+  const { algorithm, useRules = true, extraWords = [] } = options
   const res = await fetch(`${API_BASE}/api/crack`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ hash: hash.trim(), algorithm }),
+    body: JSON.stringify({
+      hash: hash.trim(),
+      algorithm,
+      use_rules: useRules,
+      extra_words: extraWords,
+    }),
   })
 
   if (!res.ok) {

@@ -11,9 +11,19 @@ type Props = {
 
 function CrackerTab({ algorithm, hexLength }: Props) {
   const [hash, setHash] = useState('')
+  const [useRules, setUseRules] = useState(true)
+  const [seedWords, setSeedWords] = useState('')
 
   const mutation = useMutation({
-    mutationFn: () => crackHash(hash, algorithm),
+    mutationFn: () =>
+      crackHash(hash, {
+        algorithm,
+        useRules,
+        extraWords: seedWords
+          .split(/[\s,]+/)
+          .map((w) => w.trim())
+          .filter(Boolean),
+      }),
   })
 
   const trimmed = hash.trim()
@@ -54,6 +64,31 @@ function CrackerTab({ algorithm, hexLength }: Props) {
             {trimmed.length}.
           </p>
         )}
+
+        <label htmlFor="seed-input" className="cracker-label">
+          Hint words (optional)
+        </label>
+        <input
+          id="seed-input"
+          className="cracker-input"
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="e.g. your name — mors, anup …"
+          value={seedWords}
+          onChange={(e) => setSeedWords(e.target.value)}
+        />
+
+        <label className="cracker-toggle">
+          <input
+            type="checkbox"
+            checked={useRules}
+            onChange={(e) => setUseRules(e.target.checked)}
+          />
+          <span>
+            Apply rules — mutate words (Mors → <code>Mors123</code>, <code>M0rs!</code>)
+          </span>
+        </label>
 
         <button type="submit" className="cracker-button" disabled={!canSubmit}>
           {mutation.isPending ? 'Cracking…' : 'Crack it'}
