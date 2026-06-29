@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { crackHash, type Special } from './api'
+import AssistantPanel from './AssistantPanel'
 
 type Props = {
   /** Algorithm to crack, e.g. "md5". */
@@ -42,6 +43,7 @@ function CrackerTab({ algorithm, hexLength }: Props) {
   const [special, setSpecial] = useState<Special>('unknown')
   const [bruteAround, setBruteAround] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [showAssistant, setShowAssistant] = useState(false)
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -275,8 +277,19 @@ function CrackerTab({ algorithm, hexLength }: Props) {
               💡 Try <strong>Advanced options</strong>: add a <strong>hint word</strong> and turn
               on <strong>Smart brute-force</strong> with the password length.
             </p>
+            <button
+              type="button"
+              className="assist-cta"
+              onClick={() => setShowAssistant((v) => !v)}
+            >
+              🤖 {showAssistant ? 'Hide AI assistant' : 'Ask the AI assistant'}
+            </button>
           </div>
         )
+      )}
+
+      {isValid && showAssistant && (
+        <AssistantPanel key={trimmed} hash={trimmed} algorithm={algorithm} />
       )}
     </div>
   )

@@ -25,11 +25,13 @@ uv run uvicorn app.main:app --reload --port 8000
 
 ## Endpoints
 
-| Method | Path              | Description                                  |
-| ------ | ----------------- | -------------------------------------------- |
-| GET    | `/api/health`     | Liveness check                               |
-| GET    | `/api/algorithms` | List supported hash algorithms               |
-| POST   | `/api/crack`      | Crack a hash against the wordlist            |
+| Method | Path                  | Description                                       |
+| ------ | --------------------- | ------------------------------------------------- |
+| GET    | `/api/health`         | Liveness check                                    |
+| GET    | `/api/algorithms`     | List supported hash algorithms                    |
+| POST   | `/api/crack`          | Crack a hash against the wordlist                 |
+| GET    | `/api/assist/status`  | Whether the AI assistant is configured            |
+| POST   | `/api/assist`         | AI-assisted cracking loop (asks questions, plans) |
 
 ### Example
 
@@ -83,3 +85,24 @@ uv run pytest
 
 `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512` — add more in
 `app/hashing.py`.
+
+## AI assistant (Gemini / Gemma)
+
+When the deterministic pipeline fails, an optional AI **strategist** can ask the
+user questions and turn the answers into crack strategies. It uses Google's
+Gemini API with the **Gemma 4 26B** model (`gemma-4-26b-a4b-it`) by default.
+
+The model never hashes anything — it only plans (asks / chooses a strategy /
+gives up as strict JSON); the deterministic engine in `cracker.py` does the real
+work. See `app/assistant.py`.
+
+Setup:
+
+```bash
+cp .env.example .env
+# edit .env and set GEMINI_API_KEY (from https://aistudio.google.com/apikey)
+```
+
+Then restart the server. Without a key, `/api/assist` returns a clean 503 and
+the rest of the API works normally. Override the model with `GEMINI_MODEL` in
+`.env`.
