@@ -15,6 +15,7 @@ type Props = {
 const EXAMPLE_HASHES: Record<string, string> = {
   md5: '6ad14ba9986e3615423dfca256d04e3f',
   sha1: '5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8', // sha1("password")
+  sha256: '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', // sha256("password")
 }
 
 function Icon({ name }: { name: 'check' | 'copy' | 'chevron' | 'spark' }) {

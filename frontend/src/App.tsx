@@ -9,6 +9,7 @@ const REPO_URL = 'https://github.com/Ruki111/Ruki-Pass'
 const TABS = [
   { algorithm: 'md5', label: 'MD5', hexLength: 32 },
   { algorithm: 'sha1', label: 'SHA-1', hexLength: 40 },
+  { algorithm: 'sha256', label: 'SHA-256', hexLength: 64 },
 ] as const
 
 type View = 'home' | 'hashpass'

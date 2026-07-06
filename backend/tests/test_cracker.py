@@ -48,6 +48,15 @@ def test_sha256_crack():
     assert result.password == "dragon"
 
 
+def test_auto_detect_sha256_by_length():
+    # SHA-256 digests are 64 hex chars — auto-detection should pick sha256.
+    target = hashlib.sha256(b"qwerty").hexdigest()
+    result = cracker.crack(target, wordlist=WORDS)  # no algorithm passed
+    assert result.found
+    assert result.password == "qwerty"
+    assert result.algorithm == "sha256"
+
+
 def test_not_found_exhausts_wordlist():
     target = hashlib.md5(b"this-is-not-in-the-list-xyz").hexdigest()
     result = cracker.crack(target, algorithm="md5", wordlist=WORDS)
