@@ -74,6 +74,111 @@ def _digits_or_empty(n: int) -> Iterator[str]:
         yield from _digit_strings(n)
 
 
+def _templates(num_digit_runs: int, has_special: bool) -> list[tuple[str, ...]]:
+    """All token orderings of one word (W), 0–``num_digit_runs`` digit runs (D),
+    and 0/1 special (S). Adjacent D runs are dropped (they'd just merge).
+
+    Ordered by likelihood: simpler/common shapes first, so the right one is hit
+    early. This is what lets a symbol land *between* digit groups, e.g. the
+    template (W, D, S, D) builds 'ruki' '123' '@' '123' = 'ruki123@123'.
+    """
+    from itertools import permutations
+
+    ordered: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
+    # Fewer digit runs first; with-special handled by caller via has_special.
+    for nd in range(0, num_digit_runs + 1):
+        multiset = ["W"] + ["D"] * nd + (["S"] if has_special else [])
+        for perm in permutations(multiset):
+            if perm in seen:
+                continue
+            if any(perm[i] == "D" and perm[i + 1] == "D" for i in range(len(perm) - 1)):
+                continue  # adjacent digit runs would merge — skip
+            seen.add(perm)
+            ordered.append(perm)
+    return ordered
+
+
+def _compositions(total: int, parts: int) -> Iterator[tuple[int, ...]]:
+    """Compositions of ``total`` into exactly ``parts`` positive integers."""
+    if parts == 0:
+        if total == 0:
+            yield ()
+        return
+    if parts == 1:
+        yield (total,)
+        return
+    for first in range(1, total - parts + 2):
+        for rest in _compositions(total - first, parts - 1):
+            yield (first, *rest)
+
+
+def _emit_template(
+    template: tuple[str, ...], base: str, digit_lengths: list[int], special: str
+) -> Iterator[str]:
+    """Yield every concrete string for one template + digit-run-length plan."""
+    from itertools import product
+
+    ranges = [range(10**dl) for dl in digit_lengths]
+    for combo in product(*ranges):
+        parts: list[str] = []
+        di = 0
+        for tok in template:
+            if tok == "W":
+                parts.append(base)
+            elif tok == "S":
+                parts.append(special)
+            else:  # "D"
+                parts.append(str(combo[di]).zfill(digit_lengths[di]))
+                di += 1
+        yield "".join(parts)
+
+
+def brute_templates(
+    words: Iterable[str],
+    length: int,
+    special: str = "unknown",
+    special_chars: list[str] | None = None,
+    max_digit_runs: int = 2,
+) -> Iterator[str]:
+    """Mask-style brute force: place the word, digit runs, and (optionally) ONE
+    special character in any arrangement that totals ``length``.
+
+    Unlike ``brute_append`` (special only at the end), this can put the symbol
+    *between* digit groups — so 'ruki123@123' (word+digits+symbol+digits) is
+    reachable. ``special_chars`` narrows the symbols to try (e.g. ['@']), which
+    massively shrinks the search; falls back to the common SPECIALS set.
+
+    Requires a known ``length`` — the digit counts are derived from it.
+    """
+    specials = special_chars or SPECIALS
+    # Whether to include a special char in the layout.
+    if special == "no":
+        special_modes = [False]
+    elif special == "yes":
+        special_modes = [True]
+    else:  # "unknown" — try both
+        special_modes = [False, True]
+
+    for word in words:
+        for base in _case_variants(word):
+            w = len(base)
+            for has_special in special_modes:
+                sp_choices = specials if has_special else [""]
+                for template in _templates(max_digit_runs, has_special):
+                    nd = template.count("D")
+                    digit_budget = length - w - (1 if has_special else 0)
+                    if digit_budget < nd or digit_budget < 0:
+                        continue
+                    if nd == 0:
+                        comps: Iterable[tuple[int, ...]] = [()] if digit_budget == 0 else []
+                    else:
+                        comps = _compositions(digit_budget, nd)
+                    for comp in comps:
+                        for sp in sp_choices:
+                            yield from _emit_template(template, base, list(comp), sp)
+
+
 def brute_append(
     words: Iterable[str],
     max_digits: int = 5,

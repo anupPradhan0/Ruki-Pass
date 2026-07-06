@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { crackHash, type Special } from './api'
+import AssistantPanel from './AssistantPanel'
 
 type Props = {
   /** Algorithm to crack, e.g. "md5". */
@@ -9,8 +10,13 @@ type Props = {
   hexLength: number
 }
 
-// A hash that cracks instantly with defaults — gives a satisfying first try.
-const EXAMPLE_HASH = '6ad14ba9986e3615423dfca256d04e3f'
+// Per-algorithm example hashes that crack instantly with defaults — a
+// satisfying first try. Keyed by algorithm so each tab gets a valid-length one.
+const EXAMPLE_HASHES: Record<string, string> = {
+  md5: '6ad14ba9986e3615423dfca256d04e3f',
+  sha1: '5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8', // sha1("password")
+  sha256: '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', // sha256("password")
+}
 
 function Icon({ name }: { name: 'check' | 'copy' | 'chevron' | 'spark' }) {
   const paths: Record<string, React.ReactNode> = {
@@ -40,8 +46,10 @@ function CrackerTab({ algorithm, hexLength }: Props) {
   const [bruteForce, setBruteForce] = useState(false)
   const [length, setLength] = useState('')
   const [special, setSpecial] = useState<Special>('unknown')
+  const [symbols, setSymbols] = useState('')
   const [bruteAround, setBruteAround] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [showAssistant, setShowAssistant] = useState(false)
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -56,6 +64,8 @@ function CrackerTab({ algorithm, hexLength }: Props) {
         length: length.trim() === '' ? null : Number(length),
         special,
         bruteAround,
+        // Distinct symbol characters the user typed, e.g. "@ !" -> ["@","!"].
+        specialChars: [...new Set(symbols.replace(/\s+/g, '').split(''))],
       }),
   })
 
@@ -93,7 +103,7 @@ function CrackerTab({ algorithm, hexLength }: Props) {
               type="button"
               className="link-btn"
               onClick={() => {
-                setHash(EXAMPLE_HASH)
+                setHash(EXAMPLE_HASHES[algorithm] ?? EXAMPLE_HASHES.md5)
                 mutation.reset()
               }}
             >
@@ -205,6 +215,21 @@ function CrackerTab({ algorithm, hexLength }: Props) {
                     </select>
                   </label>
                 </div>
+                {special === 'yes' && (
+                  <label className="brute-field">
+                    <span>Which symbols? (optional, e.g. @ ! #)</span>
+                    <input
+                      type="text"
+                      placeholder="@"
+                      value={symbols}
+                      onChange={(e) => setSymbols(e.target.value)}
+                    />
+                    <span className="msg muted" style={{ fontSize: '0.78rem' }}>
+                      Knowing the exact symbol makes it far faster. The symbol can sit
+                      anywhere — even between numbers (<code>ruki123@123</code>).
+                    </span>
+                  </label>
+                )}
                 <label className="switch-row inset">
                   <span className="switch-text">
                     <strong>Numbers before/around the word</strong>
@@ -275,8 +300,19 @@ function CrackerTab({ algorithm, hexLength }: Props) {
               💡 Try <strong>Advanced options</strong>: add a <strong>hint word</strong> and turn
               on <strong>Smart brute-force</strong> with the password length.
             </p>
+            <button
+              type="button"
+              className="assist-cta"
+              onClick={() => setShowAssistant((v) => !v)}
+            >
+              🤖 {showAssistant ? 'Hide AI assistant' : 'Ask the AI assistant'}
+            </button>
           </div>
         )
+      )}
+
+      {isValid && showAssistant && (
+        <AssistantPanel key={trimmed} hash={trimmed} algorithm={algorithm} />
       )}
     </div>
   )

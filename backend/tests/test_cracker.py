@@ -24,11 +24,37 @@ def test_auto_detect_md5_by_length():
     assert result.algorithm == "md5"
 
 
+def test_sha1_crack():
+    target = hashlib.sha1(b"letmein").hexdigest()
+    result = cracker.crack(target, algorithm="sha1", wordlist=WORDS)
+    assert result.found
+    assert result.password == "letmein"
+    assert result.algorithm == "sha1"
+
+
+def test_auto_detect_sha1_by_length():
+    # SHA-1 digests are 40 hex chars — auto-detection should pick sha1.
+    target = hashlib.sha1(b"dragon").hexdigest()
+    result = cracker.crack(target, wordlist=WORDS)  # no algorithm passed
+    assert result.found
+    assert result.password == "dragon"
+    assert result.algorithm == "sha1"
+
+
 def test_sha256_crack():
     target = hashlib.sha256(b"dragon").hexdigest()
     result = cracker.crack(target, algorithm="sha256", wordlist=WORDS)
     assert result.found
     assert result.password == "dragon"
+
+
+def test_auto_detect_sha256_by_length():
+    # SHA-256 digests are 64 hex chars — auto-detection should pick sha256.
+    target = hashlib.sha256(b"qwerty").hexdigest()
+    result = cracker.crack(target, wordlist=WORDS)  # no algorithm passed
+    assert result.found
+    assert result.password == "qwerty"
+    assert result.algorithm == "sha256"
 
 
 def test_not_found_exhausts_wordlist():
@@ -92,6 +118,49 @@ def test_brute_force_with_length_and_special():
     )
     assert result.found
     assert result.password == "anup77353"
+
+
+def test_template_symbol_in_the_middle():
+    # 'ruki123@123' = word + digits + symbol + digits — only the template
+    # generator can place the symbol between digit groups.
+    target = hashlib.md5(b"ruki123@123").hexdigest()
+    result = cracker.crack(
+        target,
+        algorithm="md5",
+        use_rules=False,
+        extra_words=["ruki"],
+        brute_force=True,
+        length=11,
+        special="yes",
+        special_chars=["@"],
+    )
+    assert result.found
+    assert result.password == "ruki123@123"
+
+
+def test_brute_templates_generates_middle_symbol():
+    from app import mutations
+
+    gen = mutations.brute_templates(["ab"], length=6, special="yes", special_chars=["@"])
+    # word 'ab' (2) + symbol (1) + 3 digits in two runs -> e.g. 'ab1@23'
+    assert any(c == "ab1@23" for c in gen)
+
+
+def test_max_candidates_cap_stops_early():
+    target = hashlib.md5(b"zzzznotfound9999").hexdigest()
+    result = cracker.crack(
+        target,
+        algorithm="md5",
+        use_rules=False,
+        extra_words=["abc"],
+        brute_force=True,
+        length=12,
+        special="unknown",
+        max_candidates=1000,
+    )
+    assert not result.found
+    assert result.capped
+    assert result.attempts <= 1000 + 1
 
 
 def test_brute_force_around_word():

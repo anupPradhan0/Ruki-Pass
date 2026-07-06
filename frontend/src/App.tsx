@@ -5,8 +5,12 @@ import CrackerTab from './CrackerTab'
 const ORG_URL = 'https://github.com/Ruki111'
 const REPO_URL = 'https://github.com/Ruki111/Ruki-Pass'
 
-// Tabs are data-driven so adding SHA-1 / SHA-256 later is a one-line change.
-const TABS = [{ algorithm: 'md5', label: 'MD5', hexLength: 32 }] as const
+// Tabs are data-driven so adding SHA-256 etc. later is a one-line change.
+const TABS = [
+  { algorithm: 'md5', label: 'MD5', hexLength: 32 },
+  { algorithm: 'sha1', label: 'SHA-1', hexLength: 40 },
+  { algorithm: 'sha256', label: 'SHA-256', hexLength: 64 },
+] as const
 
 type View = 'home' | 'hashpass'
 

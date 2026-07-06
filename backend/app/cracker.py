@@ -28,6 +28,11 @@ WORDLIST_PRIORITY = ["rockyou.txt", "common.txt"]
 # mutation would be billions of candidates). The plain full list is still tried.
 DEFAULT_RULE_SEED_LIMIT = 5000
 
+# Hard ceiling on candidates per crack call so a huge brute-force space (e.g.
+# many special chars × long length) can't run for minutes. ~430k hashes/sec in
+# pure Python, so 12M ≈ under 30s.
+DEFAULT_MAX_CANDIDATES = 12_000_000
+
 _HEX_RE = re.compile(r"^[0-9a-f]+$")
 
 
@@ -51,6 +56,7 @@ class CrackResult:
     duration_ms: float = 0.0
     wordlist_exhausted: bool = True
     wordlist: str | None = None
+    capped: bool = False  # True if we stopped at the candidate ceiling
 
 
 def normalize_hash(hash_hex: str) -> str:
@@ -84,6 +90,7 @@ def build_candidates(
     length: int | None = None,
     special: str = "unknown",
     brute_around: bool = False,
+    special_chars: list[str] | None = None,
 ) -> Iterator[str]:
     """Build the stream of password candidates to try, cheapest first.
 
@@ -97,15 +104,25 @@ def build_candidates(
         # 1. User-provided seed words, mutated (e.g. "mors" -> "Mors123").
         yield from mutations.mutate_all(extra_words)
 
-    # 2. Smart brute force on the seed words (e.g. "anup" -> "anup77353").
+    # 2. Smart brute force on the seed words.
     if brute_force and extra_words:
-        yield from mutations.brute_append(
-            extra_words,
-            max_digits=brute_max_digits,
-            length=length,
-            special=special,
-            around=brute_around,
-        )
+        if length is not None:
+            # Mask/template mode: word + digit runs + an optional symbol in ANY
+            # position (incl. between digits), e.g. 'ruki123@123'.
+            yield from mutations.brute_templates(
+                extra_words,
+                length=length,
+                special=special,
+                special_chars=special_chars,
+            )
+        else:
+            # Length unknown: fall back to suffix/around numeric brute force.
+            yield from mutations.brute_append(
+                extra_words,
+                max_digits=brute_max_digits,
+                special=special,
+                around=brute_around,
+            )
 
     if use_rules:
         # 3. The small common list, mutated.
@@ -135,14 +152,17 @@ def crack(
     length: int | None = None,
     special: str = "unknown",
     brute_around: bool = False,
+    special_chars: list[str] | None = None,
+    max_candidates: int = DEFAULT_MAX_CANDIDATES,
 ) -> CrackResult:
     """Try to recover the plaintext behind ``hash_hex``.
 
-    If ``algorithm`` is None, it's guessed from the hash length (e.g. a 32-char
-    hash is tried as MD5). When ``use_rules`` is on, base words are expanded
-    with common mutations (capitalization, trailing numbers/years, leet). When
-    ``brute_force`` is on, each ``extra_words`` seed gets numeric suffixes
-    brute-forced, pruned by ``length`` and ``special``. Returns a CrackResult.
+    If ``algorithm`` is None, it's guessed from the hash length. When
+    ``use_rules`` is on, base words are mutated (capitalization, numbers, leet).
+    When ``brute_force`` is on with a known ``length``, the template generator
+    places digits and an optional symbol (``special_chars``) in any position —
+    so 'ruki123@123' is reachable. ``max_candidates`` caps the work so a huge
+    space can't run forever. Returns a CrackResult.
     """
     target = normalize_hash(hash_hex)
 
@@ -171,12 +191,14 @@ def crack(
             length=length,
             special=special,
             brute_around=brute_around,
+            special_chars=special_chars,
         )
         base_name = default_wordlist().name
         modes = [m for m, on in (("rules", use_rules), ("brute", brute_force)) if on]
         wordlist_name = f"{base_name} + {' + '.join(modes)}" if modes else base_name
 
     attempts = 0
+    capped = False
     start = time.perf_counter()
     for word in candidates:
         for algo in algorithms:
@@ -192,6 +214,9 @@ def crack(
                     wordlist_exhausted=False,
                     wordlist=wordlist_name,
                 )
+        if attempts >= max_candidates:
+            capped = True
+            break
 
     return CrackResult(
         found=False,
@@ -199,6 +224,7 @@ def crack(
         algorithm=algorithms[0] if len(algorithms) == 1 else None,
         attempts=attempts,
         duration_ms=(time.perf_counter() - start) * 1000,
-        wordlist_exhausted=True,
+        wordlist_exhausted=not capped,
         wordlist=wordlist_name,
+        capped=capped,
     )

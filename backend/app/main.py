@@ -6,13 +6,21 @@ algorithm; the registry in ``hashing.py`` makes adding more a one-line change.
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from typing import Literal
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import cracker, hashing
+# Load backend/.env (GEMINI_API_KEY, GEMINI_MODEL) before anything reads
+# os.environ — explicit path (works regardless of launch dir) and override=True
+# so the file always wins over any stale/shadowing shell vars.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
+
+from . import assistant, cracker, hashing
 
 app = FastAPI(
     title="Ruki-Pass API",
@@ -70,6 +78,10 @@ class CrackRequest(BaseModel):
         False,
         description="Also place digits before/around the word ('45akash5465'), not just at the end.",
     )
+    special_chars: list[str] = Field(
+        default_factory=list,
+        description="Exact symbols to try (e.g. ['@']) — enables symbol-in-the-middle like 'ruki123@123'.",
+    )
 
 
 class CrackResponse(BaseModel):
@@ -81,11 +93,148 @@ class CrackResponse(BaseModel):
     duration_ms: float
     wordlist_exhausted: bool
     wordlist: str | None = None
+    capped: bool = False
 
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# Max crack attempts the assistant may run within a single /api/assist call,
+# so it can't loop or burn cost forever.
+MAX_CRACK_ATTEMPTS_PER_TURN = 2
+# Tighter candidate cap for assistant attempts so each stays fast/interactive.
+ASSIST_MAX_CANDIDATES = 6_000_000
+
+
+class TranscriptMessage(BaseModel):
+    role: Literal["assistant", "user", "system"]
+    text: str
+
+
+class AssistRequest(BaseModel):
+    hash: str = Field(..., description="The hash to recover.")
+    algorithm: str | None = Field(None, description="Hash algorithm, e.g. 'md5'.")
+    transcript: list[TranscriptMessage] = Field(
+        default_factory=list,
+        description="Conversation so far. Empty on the first call.",
+    )
+
+
+class AssistResponse(BaseModel):
+    # need_input → show questions; solved → password; gave_up / exhausted → stop.
+    status: Literal["need_input", "solved", "gave_up", "exhausted"]
+    thought: str = ""
+    questions: list[str] = Field(default_factory=list)
+    password: str | None = None
+    attempts: int | None = None
+    strategy_note: str | None = None
+    reason: str | None = None
+    transcript: list[TranscriptMessage] = Field(default_factory=list)
+
+
+@app.get("/api/assist/status")
+def assist_status() -> dict[str, object]:
+    """Report whether the AI assistant is configured (API key present).
+
+    The model name is redacted if it looks like a secret — guards against a
+    misconfigured .env where a key was put in GEMINI_MODEL by mistake.
+    """
+    model = assistant.MODEL
+    safe_model = assistant.redact_secrets(model)
+    if safe_model != model:
+        safe_model = "(misconfigured: GEMINI_MODEL looks like a key)"
+    return {"available": assistant.is_configured(), "model": safe_model}
+
+
+@app.post("/api/assist", response_model=AssistResponse)
+def assist(req: AssistRequest) -> AssistResponse:
+    """Advance the AI-assisted cracking loop by one user-facing step.
+
+    The model decides to ask the user questions, run a crack strategy, or give
+    up. Crack attempts run server-side against the real engine; the loop pauses
+    and returns to the client whenever it needs the user to answer something.
+    """
+    # Redact any credential-looking text a user may have pasted, so it's never
+    # stored, echoed back to the browser, or sent on to the model.
+    transcript = [
+        {"role": m.role, "text": assistant.redact_secrets(m.text)}
+        for m in req.transcript
+    ]
+
+    for _ in range(MAX_CRACK_ATTEMPTS_PER_TURN):
+        try:
+            decision = assistant.decide(req.hash, req.algorithm or "md5", transcript)
+        except assistant.AssistantError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        if decision.action == "ask":
+            for q in decision.questions:
+                transcript.append({"role": "assistant", "text": q})
+            return AssistResponse(
+                status="need_input",
+                thought=decision.thought,
+                questions=decision.questions,
+                transcript=[TranscriptMessage(**m) for m in transcript],
+            )
+
+        if decision.action == "give_up":
+            return AssistResponse(
+                status="gave_up",
+                thought=decision.thought,
+                reason=decision.reason,
+                transcript=[TranscriptMessage(**m) for m in transcript],
+            )
+
+        # action == "crack": run the real engine with the model's strategy.
+        s = decision.strategy
+        try:
+            result = cracker.crack(
+                req.hash,
+                algorithm=req.algorithm,
+                use_rules=bool(s.get("use_rules", True)),
+                extra_words=[str(w) for w in s.get("extra_words", [])],
+                brute_force=bool(s.get("brute_force", False)),
+                length=s.get("length") if isinstance(s.get("length"), int) else None,
+                special=s.get("special", "unknown")
+                if s.get("special") in {"yes", "no", "unknown"}
+                else "unknown",
+                special_chars=[str(c) for c in s.get("special_chars", [])],
+                max_candidates=ASSIST_MAX_CANDIDATES,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        note = str(s.get("note", "")) or "tried a strategy"
+        if result.found:
+            transcript.append(
+                {"role": "system", "text": f"Crack attempt ({note}): FOUND '{result.password}'."}
+            )
+            return AssistResponse(
+                status="solved",
+                thought=decision.thought,
+                password=result.password,
+                attempts=result.attempts,
+                strategy_note=note,
+                transcript=[TranscriptMessage(**m) for m in transcript],
+            )
+
+        # Not found — record the outcome and let the model react on the next pass.
+        transcript.append(
+            {
+                "role": "system",
+                "text": f"Crack attempt ({note}): NOT FOUND after "
+                f"{result.attempts:,} candidates.",
+            }
+        )
+
+    # Ran out of attempts for this turn without solving or asking.
+    return AssistResponse(
+        status="exhausted",
+        thought="Tried several strategies this round without success.",
+        transcript=[TranscriptMessage(**m) for m in transcript],
+    )
 
 
 @app.get("/api/algorithms")
@@ -108,6 +257,7 @@ def crack(req: CrackRequest) -> CrackResponse:
             length=req.length,
             special=req.special,
             brute_around=req.brute_around,
+            special_chars=req.special_chars,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -121,4 +271,5 @@ def crack(req: CrackRequest) -> CrackResponse:
         duration_ms=round(result.duration_ms, 3),
         wordlist_exhausted=result.wordlist_exhausted,
         wordlist=result.wordlist,
+        capped=result.capped,
     )
