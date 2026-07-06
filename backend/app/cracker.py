@@ -33,6 +33,12 @@ DEFAULT_RULE_SEED_LIMIT = 5000
 # pure Python, so 12M ≈ under 30s.
 DEFAULT_MAX_CANDIDATES = 12_000_000
 
+# PBKDF2 runs `iterations` HMACs per guess (thousands), so it's orders of
+# magnitude slower than a plain hash — the full rockyou scan is out of reach.
+# Cap far lower: hint words + rules + the small common list are the practical
+# path. A hit on a targeted guess still returns immediately.
+DEFAULT_PBKDF2_MAX_CANDIDATES = 20_000
+
 _HEX_RE = re.compile(r"^[0-9a-f]+$")
 
 
@@ -226,5 +232,75 @@ def crack(
         duration_ms=(time.perf_counter() - start) * 1000,
         wordlist_exhausted=not capped,
         wordlist=wordlist_name,
+        capped=capped,
+    )
+
+
+def crack_pbkdf2(
+    target: hashing.Pbkdf2Target,
+    wordlist: Iterable[str] | None = None,
+    use_rules: bool = True,
+    extra_words: list[str] | None = None,
+    rule_seed_limit: int = DEFAULT_RULE_SEED_LIMIT,
+    brute_force: bool = False,
+    brute_max_digits: int = 5,
+    length: int | None = None,
+    special: str = "unknown",
+    brute_around: bool = False,
+    special_chars: list[str] | None = None,
+    max_candidates: int = DEFAULT_PBKDF2_MAX_CANDIDATES,
+) -> CrackResult:
+    """Recover the password behind a PBKDF2 ``target`` (salt + iterations known).
+
+    Mirrors ``crack`` for the shared options (rules, hint words, brute force),
+    but each guess is far more expensive, so the candidate ceiling is low and
+    the big wordlist scan is effectively unreachable — hint words + rules are
+    the practical route. Returns a CrackResult with algorithm ``"pbkdf2"``.
+    """
+    label = f"pbkdf2_{target.prf} ({target.iterations:,} iters)"
+    tag = f"pbkdf2_{target.prf}"
+    if wordlist is not None:
+        candidates: Iterable[str] = wordlist
+    else:
+        candidates = build_candidates(
+            use_rules,
+            extra_words,
+            rule_seed_limit,
+            brute_force=brute_force,
+            brute_max_digits=brute_max_digits,
+            length=length,
+            special=special,
+            brute_around=brute_around,
+            special_chars=special_chars,
+        )
+
+    attempts = 0
+    capped = False
+    start = time.perf_counter()
+    for word in candidates:
+        attempts += 1
+        if hashing.pbkdf2_matches(target, word):
+            return CrackResult(
+                found=True,
+                hash=tag,
+                algorithm="pbkdf2",
+                password=word,
+                attempts=attempts,
+                duration_ms=(time.perf_counter() - start) * 1000,
+                wordlist_exhausted=False,
+                wordlist=label,
+            )
+        if attempts >= max_candidates:
+            capped = True
+            break
+
+    return CrackResult(
+        found=False,
+        hash=tag,
+        algorithm="pbkdf2",
+        attempts=attempts,
+        duration_ms=(time.perf_counter() - start) * 1000,
+        wordlist_exhausted=not capped,
+        wordlist=label,
         capped=capped,
     )

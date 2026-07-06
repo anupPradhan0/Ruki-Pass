@@ -199,6 +199,60 @@ def test_brute_append_respects_length():
     assert "anup77353" in cands
 
 
+def test_pbkdf2_crack_raw_fields():
+    # Raw derived key (hex) + explicit salt/iterations/prf.
+    dk = hashlib.pbkdf2_hmac("sha256", b"letmein", b"salty", 1000, 32)
+    target = hashing.build_pbkdf2_target(dk.hex(), "salty", 1000, "sha256")
+    result = cracker.crack_pbkdf2(target, wordlist=WORDS)
+    assert result.found
+    assert result.password == "letmein"
+    assert result.algorithm == "pbkdf2"
+
+
+def test_pbkdf2_crack_encoded_django_string():
+    # Django-style encoded string carries salt + iterations inline.
+    import base64
+
+    dk = hashlib.pbkdf2_hmac("sha256", b"dragon", b"abc", 1000, 32)
+    encoded = "pbkdf2_sha256$1000$abc$" + base64.b64encode(dk).decode()
+    target = hashing.build_pbkdf2_target(encoded)
+    assert target.iterations == 1000
+    assert target.salt == b"abc"
+    result = cracker.crack_pbkdf2(target, wordlist=WORDS)
+    assert result.found
+    assert result.password == "dragon"
+
+
+def test_pbkdf2_rfc6070_vector():
+    # RFC 6070 vector: PBKDF2-HMAC-SHA1("password", "salt", 1, 20).
+    target = hashing.build_pbkdf2_target(
+        "0c60c80f961f0e71f3a9b524af6012062fe037a6", "salt", 1, "sha1"
+    )
+    assert hashing.pbkdf2_matches(target, "password")
+    assert not hashing.pbkdf2_matches(target, "wrong")
+
+
+def test_pbkdf2_requires_salt_and_iterations():
+    # A raw hash with no salt/iterations can't be verified — must raise.
+    try:
+        hashing.build_pbkdf2_target("0c60c80f961f0e71f3a9b524af6012062fe037a6")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError without salt/iterations")
+
+
+def test_pbkdf2_iterations_cap():
+    # An absurd iteration count is rejected so one guess can't hang the machine.
+    encoded = "pbkdf2_sha256$999999999$abc$" + "A" * 44
+    try:
+        hashing.build_pbkdf2_target(encoded)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for iterations over the cap")
+
+
 def test_rules_off_skips_mutations():
     target = hashlib.md5(b"Mors123").hexdigest()
     # With rules off and the seed only tried verbatim, "Mors123" won't be built.

@@ -82,6 +82,22 @@ class CrackRequest(BaseModel):
         default_factory=list,
         description="Exact symbols to try (e.g. ['@']) — enables symbol-in-the-middle like 'ruki123@123'.",
     )
+    # PBKDF2-only fields (ignored for plain hashes). Omit salt/iterations when
+    # `hash` is a full 'pbkdf2_sha256$iterations$salt$hash' encoded string.
+    salt: str | None = Field(
+        None,
+        description="PBKDF2 salt (text). Not needed if the hash is an encoded string.",
+    )
+    iterations: int | None = Field(
+        None,
+        ge=1,
+        le=5_000_000,
+        description="PBKDF2 iteration count. Not needed if the hash is an encoded string.",
+    )
+    prf: str = Field(
+        "sha256",
+        description="PBKDF2 pseudo-random function, e.g. 'sha256'.",
+    )
 
 
 class CrackResponse(BaseModel):
@@ -245,20 +261,41 @@ def algorithms() -> dict[str, list[str]]:
 
 @app.post("/api/crack", response_model=CrackResponse)
 def crack(req: CrackRequest) -> CrackResponse:
-    """Attempt to recover the plaintext behind a hash using the wordlist."""
+    """Attempt to recover the plaintext behind a hash using the wordlist.
+
+    PBKDF2 (algorithm 'pbkdf2') takes a different path: it needs the salt and
+    iteration count, supplied either inline in an encoded 'pbkdf2_...' string or
+    via the salt/iterations/prf fields.
+    """
     try:
-        result = cracker.crack(
-            req.hash,
-            algorithm=req.algorithm,
-            use_rules=req.use_rules,
-            extra_words=req.extra_words,
-            brute_force=req.brute_force,
-            brute_max_digits=req.brute_max_digits,
-            length=req.length,
-            special=req.special,
-            brute_around=req.brute_around,
-            special_chars=req.special_chars,
-        )
+        if req.algorithm == "pbkdf2":
+            target = hashing.build_pbkdf2_target(
+                req.hash, req.salt, req.iterations, req.prf
+            )
+            result = cracker.crack_pbkdf2(
+                target,
+                use_rules=req.use_rules,
+                extra_words=req.extra_words,
+                brute_force=req.brute_force,
+                brute_max_digits=req.brute_max_digits,
+                length=req.length,
+                special=req.special,
+                brute_around=req.brute_around,
+                special_chars=req.special_chars,
+            )
+        else:
+            result = cracker.crack(
+                req.hash,
+                algorithm=req.algorithm,
+                use_rules=req.use_rules,
+                extra_words=req.extra_words,
+                brute_force=req.brute_force,
+                brute_max_digits=req.brute_max_digits,
+                length=req.length,
+                special=req.special,
+                brute_around=req.brute_around,
+                special_chars=req.special_chars,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
