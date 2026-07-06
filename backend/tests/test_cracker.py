@@ -24,6 +24,23 @@ def test_auto_detect_md5_by_length():
     assert result.algorithm == "md5"
 
 
+def test_sha1_crack():
+    target = hashlib.sha1(b"letmein").hexdigest()
+    result = cracker.crack(target, algorithm="sha1", wordlist=WORDS)
+    assert result.found
+    assert result.password == "letmein"
+    assert result.algorithm == "sha1"
+
+
+def test_auto_detect_sha1_by_length():
+    # SHA-1 digests are 40 hex chars — auto-detection should pick sha1.
+    target = hashlib.sha1(b"dragon").hexdigest()
+    result = cracker.crack(target, wordlist=WORDS)  # no algorithm passed
+    assert result.found
+    assert result.password == "dragon"
+    assert result.algorithm == "sha1"
+
+
 def test_sha256_crack():
     target = hashlib.sha256(b"dragon").hexdigest()
     result = cracker.crack(target, algorithm="sha256", wordlist=WORDS)

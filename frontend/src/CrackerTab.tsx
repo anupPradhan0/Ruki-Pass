@@ -10,8 +10,12 @@ type Props = {
   hexLength: number
 }
 
-// A hash that cracks instantly with defaults — gives a satisfying first try.
-const EXAMPLE_HASH = '6ad14ba9986e3615423dfca256d04e3f'
+// Per-algorithm example hashes that crack instantly with defaults — a
+// satisfying first try. Keyed by algorithm so each tab gets a valid-length one.
+const EXAMPLE_HASHES: Record<string, string> = {
+  md5: '6ad14ba9986e3615423dfca256d04e3f',
+  sha1: '5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8', // sha1("password")
+}
 
 function Icon({ name }: { name: 'check' | 'copy' | 'chevron' | 'spark' }) {
   const paths: Record<string, React.ReactNode> = {
@@ -98,7 +102,7 @@ function CrackerTab({ algorithm, hexLength }: Props) {
               type="button"
               className="link-btn"
               onClick={() => {
-                setHash(EXAMPLE_HASH)
+                setHash(EXAMPLE_HASHES[algorithm] ?? EXAMPLE_HASHES.md5)
                 mutation.reset()
               }}
             >
