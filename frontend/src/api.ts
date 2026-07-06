@@ -69,6 +69,10 @@ export type CrackOptions = {
   special?: Special
   bruteAround?: boolean
   specialChars?: string[]
+  // PBKDF2 only — ignored for plain hashes.
+  salt?: string | null
+  iterations?: number | null
+  prf?: string
 }
 
 export async function crackHash(
@@ -85,6 +89,9 @@ export async function crackHash(
     special = 'unknown',
     bruteAround = false,
     specialChars = [],
+    salt = null,
+    iterations = null,
+    prf = 'sha256',
   } = options
   const res = await fetch(`${API_BASE}/api/crack`, {
     method: 'POST',
@@ -100,6 +107,9 @@ export async function crackHash(
       special,
       brute_around: bruteAround,
       special_chars: specialChars,
+      salt: salt ?? null,
+      iterations: iterations ?? null,
+      prf,
     }),
   })
 

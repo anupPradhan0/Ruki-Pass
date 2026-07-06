@@ -8,8 +8,13 @@ so MD5 is just the first of many.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import hmac
+import re
 from collections.abc import Callable
+from dataclasses import dataclass
 
 # name -> function(bytes) -> hex digest (lowercase)
 ALGORITHMS: dict[str, Callable[[bytes], str]] = {
@@ -44,3 +49,128 @@ def detect_algorithms(hash_hex: str) -> list[str]:
     """Best-effort guess of which algorithms could have produced this hash,
     based on its hex length. Returns an empty list if nothing matches."""
     return LENGTH_TO_ALGORITHMS.get(len(hash_hex.strip()), [])
+
+
+# ---------------------------------------------------------------------------
+# PBKDF2 — a slow, salted key-derivation function, NOT a plain hash.
+#
+# Unlike the algorithms above, verifying a candidate needs the SALT and the
+# ITERATION count as well as the password, so PBKDF2 lives outside the simple
+# name->digest ALGORITHMS registry. Two input shapes are accepted:
+#   1. A Django-style encoded string: pbkdf2_<prf>$<iterations>$<salt>$<b64hash>
+#      (salt + iterations are embedded — the user pastes one value).
+#   2. A raw derived key (hex or base64) plus an explicit salt/iterations/prf.
+# ---------------------------------------------------------------------------
+
+# PRF (pseudo-random function) names hashlib.pbkdf2_hmac accepts.
+PBKDF2_PRFS = {"sha1", "sha224", "sha256", "sha384", "sha512", "md5"}
+
+# Hard ceiling on iterations so one malformed/huge target can't hang the machine
+# for minutes on a single candidate (PBKDF2 cost scales linearly with them).
+MAX_PBKDF2_ITERATIONS = 5_000_000
+
+_PBKDF2_ENCODED_RE = re.compile(
+    r"^pbkdf2_(?P<prf>[a-z0-9]+)\$(?P<iterations>\d+)\$(?P<salt>[^$]*)\$(?P<hash>[A-Za-z0-9+/=_\-]+)$"
+)
+
+
+@dataclass
+class Pbkdf2Target:
+    """Everything needed to test a password against a PBKDF2 hash."""
+
+    prf: str          # e.g. "sha256"
+    iterations: int
+    salt: bytes
+    digest: bytes     # the expected derived key, raw bytes
+
+    @property
+    def dklen(self) -> int:
+        return len(self.digest)
+
+
+def _b64_to_bytes(text: str) -> bytes:
+    """Decode base64 (standard or URL-safe), tolerating missing padding."""
+    padded = text + "=" * (-len(text) % 4)
+    try:
+        return base64.b64decode(padded)
+    except (binascii.Error, ValueError):
+        return base64.urlsafe_b64decode(padded)
+
+
+def _decode_key(text: str) -> bytes:
+    """Decode a derived key given as hex or base64 into raw bytes."""
+    s = text.strip()
+    if len(s) % 2 == 0 and re.fullmatch(r"[0-9a-fA-F]+", s):
+        return bytes.fromhex(s)
+    return _b64_to_bytes(s)
+
+
+def parse_pbkdf2_encoded(encoded: str) -> Pbkdf2Target | None:
+    """Parse a 'pbkdf2_<prf>$<iterations>$<salt>$<b64hash>' string, or return
+    None if the text isn't in that shape (so the caller can fall back to
+    explicit fields)."""
+    m = _PBKDF2_ENCODED_RE.match(encoded.strip())
+    if not m:
+        return None
+    prf = m.group("prf")
+    if prf not in PBKDF2_PRFS:
+        raise ValueError(f"unsupported PBKDF2 PRF: {prf!r}")
+    return Pbkdf2Target(
+        prf=prf,
+        iterations=int(m.group("iterations")),
+        salt=m.group("salt").encode("utf-8"),
+        digest=_b64_to_bytes(m.group("hash")),
+    )
+
+
+def build_pbkdf2_target(
+    hash_str: str,
+    salt: str | None = None,
+    iterations: int | None = None,
+    prf: str = "sha256",
+) -> Pbkdf2Target:
+    """Build a Pbkdf2Target from either an encoded string (salt/iterations
+    embedded) or a raw derived key plus explicit salt/iterations/prf. Raises
+    ValueError on anything unusable."""
+    target = parse_pbkdf2_encoded(hash_str)
+    if target is None:
+        if not (salt or "").strip() or iterations is None:
+            raise ValueError(
+                "PBKDF2 needs a salt and an iteration count. Paste a "
+                "'pbkdf2_sha256$iterations$salt$hash' string, or fill in the "
+                "salt and iterations fields."
+            )
+        if prf not in PBKDF2_PRFS:
+            raise ValueError(f"unsupported PBKDF2 PRF: {prf!r}")
+        try:
+            digest = _decode_key(hash_str)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("PBKDF2 hash must be valid hex or base64") from exc
+        if not digest:
+            raise ValueError("PBKDF2 hash is empty")
+        target = Pbkdf2Target(
+            prf=prf,
+            iterations=int(iterations),
+            salt=salt.encode("utf-8"),
+            digest=digest,
+        )
+    if target.iterations < 1:
+        raise ValueError("PBKDF2 iterations must be >= 1")
+    if target.iterations > MAX_PBKDF2_ITERATIONS:
+        raise ValueError(
+            f"PBKDF2 iterations {target.iterations:,} exceed the safety limit "
+            f"of {MAX_PBKDF2_ITERATIONS:,}."
+        )
+    return target
+
+
+def pbkdf2_matches(target: Pbkdf2Target, password: str) -> bool:
+    """True if ``password`` derives ``target``'s expected key."""
+    derived = hashlib.pbkdf2_hmac(
+        target.prf,
+        password.encode("utf-8"),
+        target.salt,
+        target.iterations,
+        target.dklen,
+    )
+    return hmac.compare_digest(derived, target.digest)
