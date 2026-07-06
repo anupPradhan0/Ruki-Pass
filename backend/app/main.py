@@ -8,13 +8,17 @@ from __future__ import annotations
 
 from typing import Literal
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# Load backend/.env (GEMINI_API_KEY, GEMINI_MODEL) before anything reads os.environ.
-load_dotenv()
+# Load backend/.env (GEMINI_API_KEY, GEMINI_MODEL) before anything reads
+# os.environ — explicit path (works regardless of launch dir) and override=True
+# so the file always wins over any stale/shadowing shell vars.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 
 from . import assistant, cracker, hashing
 
@@ -74,6 +78,10 @@ class CrackRequest(BaseModel):
         False,
         description="Also place digits before/around the word ('45akash5465'), not just at the end.",
     )
+    special_chars: list[str] = Field(
+        default_factory=list,
+        description="Exact symbols to try (e.g. ['@']) — enables symbol-in-the-middle like 'ruki123@123'.",
+    )
 
 
 class CrackResponse(BaseModel):
@@ -85,6 +93,7 @@ class CrackResponse(BaseModel):
     duration_ms: float
     wordlist_exhausted: bool
     wordlist: str | None = None
+    capped: bool = False
 
 
 @app.get("/api/health")
@@ -94,7 +103,9 @@ def health() -> dict[str, str]:
 
 # Max crack attempts the assistant may run within a single /api/assist call,
 # so it can't loop or burn cost forever.
-MAX_CRACK_ATTEMPTS_PER_TURN = 4
+MAX_CRACK_ATTEMPTS_PER_TURN = 2
+# Tighter candidate cap for assistant attempts so each stays fast/interactive.
+ASSIST_MAX_CANDIDATES = 6_000_000
 
 
 class TranscriptMessage(BaseModel):
@@ -125,8 +136,16 @@ class AssistResponse(BaseModel):
 
 @app.get("/api/assist/status")
 def assist_status() -> dict[str, object]:
-    """Report whether the AI assistant is configured (API key present)."""
-    return {"available": assistant.is_configured(), "model": assistant.MODEL}
+    """Report whether the AI assistant is configured (API key present).
+
+    The model name is redacted if it looks like a secret — guards against a
+    misconfigured .env where a key was put in GEMINI_MODEL by mistake.
+    """
+    model = assistant.MODEL
+    safe_model = assistant.redact_secrets(model)
+    if safe_model != model:
+        safe_model = "(misconfigured: GEMINI_MODEL looks like a key)"
+    return {"available": assistant.is_configured(), "model": safe_model}
 
 
 @app.post("/api/assist", response_model=AssistResponse)
@@ -181,7 +200,8 @@ def assist(req: AssistRequest) -> AssistResponse:
                 special=s.get("special", "unknown")
                 if s.get("special") in {"yes", "no", "unknown"}
                 else "unknown",
-                brute_around=bool(s.get("brute_around", False)),
+                special_chars=[str(c) for c in s.get("special_chars", [])],
+                max_candidates=ASSIST_MAX_CANDIDATES,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -237,6 +257,7 @@ def crack(req: CrackRequest) -> CrackResponse:
             length=req.length,
             special=req.special,
             brute_around=req.brute_around,
+            special_chars=req.special_chars,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -250,4 +271,5 @@ def crack(req: CrackRequest) -> CrackResponse:
         duration_ms=round(result.duration_ms, 3),
         wordlist_exhausted=result.wordlist_exhausted,
         wordlist=result.wordlist,
+        capped=result.capped,
     )

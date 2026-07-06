@@ -41,6 +41,7 @@ function CrackerTab({ algorithm, hexLength }: Props) {
   const [bruteForce, setBruteForce] = useState(false)
   const [length, setLength] = useState('')
   const [special, setSpecial] = useState<Special>('unknown')
+  const [symbols, setSymbols] = useState('')
   const [bruteAround, setBruteAround] = useState(false)
   const [copied, setCopied] = useState(false)
   const [showAssistant, setShowAssistant] = useState(false)
@@ -58,6 +59,8 @@ function CrackerTab({ algorithm, hexLength }: Props) {
         length: length.trim() === '' ? null : Number(length),
         special,
         bruteAround,
+        // Distinct symbol characters the user typed, e.g. "@ !" -> ["@","!"].
+        specialChars: [...new Set(symbols.replace(/\s+/g, '').split(''))],
       }),
   })
 
@@ -207,6 +210,21 @@ function CrackerTab({ algorithm, hexLength }: Props) {
                     </select>
                   </label>
                 </div>
+                {special === 'yes' && (
+                  <label className="brute-field">
+                    <span>Which symbols? (optional, e.g. @ ! #)</span>
+                    <input
+                      type="text"
+                      placeholder="@"
+                      value={symbols}
+                      onChange={(e) => setSymbols(e.target.value)}
+                    />
+                    <span className="msg muted" style={{ fontSize: '0.78rem' }}>
+                      Knowing the exact symbol makes it far faster. The symbol can sit
+                      anywhere — even between numbers (<code>ruki123@123</code>).
+                    </span>
+                  </label>
+                )}
                 <label className="switch-row inset">
                   <span className="switch-text">
                     <strong>Numbers before/around the word</strong>

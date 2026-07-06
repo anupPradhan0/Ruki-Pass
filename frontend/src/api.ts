@@ -68,6 +68,7 @@ export type CrackOptions = {
   length?: number | null
   special?: Special
   bruteAround?: boolean
+  specialChars?: string[]
 }
 
 export async function crackHash(
@@ -83,6 +84,7 @@ export async function crackHash(
     length = null,
     special = 'unknown',
     bruteAround = false,
+    specialChars = [],
   } = options
   const res = await fetch(`${API_BASE}/api/crack`, {
     method: 'POST',
@@ -97,6 +99,7 @@ export async function crackHash(
       length: length ?? null,
       special,
       brute_around: bruteAround,
+      special_chars: specialChars,
     }),
   })
 

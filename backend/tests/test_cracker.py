@@ -94,6 +94,49 @@ def test_brute_force_with_length_and_special():
     assert result.password == "anup77353"
 
 
+def test_template_symbol_in_the_middle():
+    # 'ruki123@123' = word + digits + symbol + digits — only the template
+    # generator can place the symbol between digit groups.
+    target = hashlib.md5(b"ruki123@123").hexdigest()
+    result = cracker.crack(
+        target,
+        algorithm="md5",
+        use_rules=False,
+        extra_words=["ruki"],
+        brute_force=True,
+        length=11,
+        special="yes",
+        special_chars=["@"],
+    )
+    assert result.found
+    assert result.password == "ruki123@123"
+
+
+def test_brute_templates_generates_middle_symbol():
+    from app import mutations
+
+    gen = mutations.brute_templates(["ab"], length=6, special="yes", special_chars=["@"])
+    # word 'ab' (2) + symbol (1) + 3 digits in two runs -> e.g. 'ab1@23'
+    assert any(c == "ab1@23" for c in gen)
+
+
+def test_max_candidates_cap_stops_early():
+    target = hashlib.md5(b"zzzznotfound9999").hexdigest()
+    result = cracker.crack(
+        target,
+        algorithm="md5",
+        use_rules=False,
+        extra_words=["abc"],
+        brute_force=True,
+        length=12,
+        special="unknown",
+        max_candidates=1000,
+    )
+    assert not result.found
+    assert result.capped
+    assert result.attempts <= 1000 + 1
+
+
 def test_brute_force_around_word():
     # "45akash5465" = digits + word + digits; only the `around` option builds it.
     target = hashlib.md5(b"45akash5465").hexdigest()

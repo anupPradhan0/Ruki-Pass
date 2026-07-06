@@ -7,6 +7,15 @@ type Props = {
   algorithm: string
 }
 
+// Mask anything that looks like a key/token in any text we render.
+function maskSecrets(text: string): string {
+  return text
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[hidden]')
+    .replace(/\bAQ\.[0-9A-Za-z_-]{10,}/g, '[hidden]')
+    .replace(/\bya29\.[0-9A-Za-z_-]+/g, '[hidden]')
+    .replace(/\bsk-[0-9A-Za-z_-]{15,}/g, '[hidden]')
+}
+
 // Reject anything that looks like an API key / token so it never leaves the box.
 function looksLikeSecret(s: string): boolean {
   const t = s.trim()
@@ -79,7 +88,7 @@ function AssistantPanel({ hash, algorithm }: Props) {
     <div className="assist">
       <div className="assist-head">
         <span className="assist-title">🤖 AI assistant</span>
-        <span className="assist-model">{status.data.model}</span>
+        <span className="assist-model">{maskSecrets(status.data.model)}</span>
       </div>
 
       {!started ? (
@@ -91,7 +100,7 @@ function AssistantPanel({ hash, algorithm }: Props) {
         <div className="assist-chat">
           {transcript.map((m, i) => (
             <div key={i} className={`bubble ${m.role}`}>
-              {m.role === 'system' ? <em>{m.text}</em> : m.text}
+              {m.role === 'system' ? <em>{maskSecrets(m.text)}</em> : maskSecrets(m.text)}
             </div>
           ))}
           {waiting && <div className="bubble assistant"><span className="spinner" /> thinking…</div>}
