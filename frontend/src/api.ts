@@ -27,7 +27,16 @@ export async function assist(
   hash: string,
   algorithm: string,
   transcript: TranscriptMessage[],
-  opts: { salt?: string | null; iterations?: number | null; prf?: string } = {},
+  opts: {
+    salt?: string | null
+    iterations?: number | null
+    prf?: string
+    // Form facts the user already entered, so the AI won't re-ask them.
+    extraWords?: string[]
+    length?: number | null
+    special?: string
+    specialChars?: string[]
+  } = {},
 ): Promise<AssistResponse> {
   const res = await fetch(`${API_BASE}/api/assist`, {
     method: 'POST',
@@ -39,6 +48,10 @@ export async function assist(
       salt: opts.salt ?? null,
       iterations: opts.iterations ?? null,
       prf: opts.prf ?? 'sha256',
+      extra_words: opts.extraWords ?? [],
+      length: opts.length ?? null,
+      special: opts.special ?? 'unknown',
+      special_chars: opts.specialChars ?? [],
     }),
   })
   if (!res.ok) {

@@ -120,6 +120,7 @@ def build_candidates(
     special: str = "unknown",
     brute_around: bool = False,
     special_chars: list[str] | None = None,
+    direct_candidates: list[str] | None = None,
 ) -> Iterator[str]:
     """Build the stream of password candidates to try, cheapest first.
 
@@ -128,6 +129,10 @@ def build_candidates(
     wordlist — so a hit on a custom password is fast.
     """
     extra_words = extra_words or []
+
+    # -1. Concrete guesses from the AI assistant — full passwords tried exactly
+    # as written, before anything else (its highest-value output).
+    yield from direct_candidates or []
 
     # 0. Passwords learned from the hash generator — confirmed real, cheapest
     # high-value guesses, so try them (and their mutations) before anything else.
@@ -189,6 +194,7 @@ def crack(
     special: str = "unknown",
     brute_around: bool = False,
     special_chars: list[str] | None = None,
+    direct_candidates: list[str] | None = None,
     max_candidates: int = DEFAULT_MAX_CANDIDATES,
 ) -> CrackResult:
     """Try to recover the plaintext behind ``hash_hex``.
@@ -228,6 +234,7 @@ def crack(
             special=special,
             brute_around=brute_around,
             special_chars=special_chars,
+            direct_candidates=direct_candidates,
         )
         base_name = default_wordlist().name
         modes = [m for m, on in (("rules", use_rules), ("brute", brute_force)) if on]
@@ -278,6 +285,7 @@ def crack_pbkdf2(
     special: str = "unknown",
     brute_around: bool = False,
     special_chars: list[str] | None = None,
+    direct_candidates: list[str] | None = None,
     max_candidates: int = DEFAULT_PBKDF2_MAX_CANDIDATES,
 ) -> CrackResult:
     """Recover the password behind a PBKDF2 ``target`` (salt + iterations known).
@@ -302,6 +310,7 @@ def crack_pbkdf2(
             special=special,
             brute_around=brute_around,
             special_chars=special_chars,
+            direct_candidates=direct_candidates,
         )
 
     attempts = 0
@@ -348,6 +357,7 @@ def crack_bcrypt(
     special: str = "unknown",
     brute_around: bool = False,
     special_chars: list[str] | None = None,
+    direct_candidates: list[str] | None = None,
     max_candidates: int = DEFAULT_BCRYPT_MAX_CANDIDATES,
 ) -> CrackResult:
     """Recover the password behind a bcrypt ``hashed`` string (self-contained:
@@ -372,6 +382,7 @@ def crack_bcrypt(
             special=special,
             brute_around=brute_around,
             special_chars=special_chars,
+            direct_candidates=direct_candidates,
         )
 
     attempts = 0

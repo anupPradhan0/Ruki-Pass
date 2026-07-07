@@ -354,6 +354,12 @@ function Pbkdf2Tab() {
           salt={isEncoded ? null : salt.trim()}
           iterations={isEncoded ? null : Number(iterations)}
           prf={prf}
+          hints={{
+            extraWords: seedWords.split(/[\s,]+/).map((w) => w.trim()).filter(Boolean),
+            length: length.trim() === '' ? null : Number(length),
+            special,
+            specialChars: [...new Set(symbols.replace(/\s+/g, '').split(''))],
+          }}
         />
       )}
     </div>

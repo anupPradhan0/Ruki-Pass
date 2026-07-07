@@ -297,6 +297,19 @@ def test_learn_password_appends(tmp_path, monkeypatch):
     assert "s3cret!" in set(cracker.iter_wordlist(wl))
 
 
+def test_direct_candidates_tried_first():
+    # An AI guess the wordlist/rules would never build — supplied directly, it
+    # must still be found (and immediately, since direct candidates go first).
+    weird = "Rex@2015zzz"
+    target = hashlib.md5(weird.encode()).hexdigest()
+    result = cracker.crack(
+        target, algorithm="md5", use_rules=False, direct_candidates=[weird]
+    )
+    assert result.found
+    assert result.password == weird
+    assert result.attempts == 1
+
+
 def test_rules_off_skips_mutations():
     target = hashlib.md5(b"Mors123").hexdigest()
     # With rules off and the seed only tried verbatim, "Mors123" won't be built.

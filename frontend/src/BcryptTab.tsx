@@ -295,7 +295,17 @@ function BcryptTab() {
       )}
 
       {isValid && showAssistant && (
-        <AssistantPanel key={trimmed} hash={trimmed} algorithm="bcrypt" />
+        <AssistantPanel
+          key={trimmed}
+          hash={trimmed}
+          algorithm="bcrypt"
+          hints={{
+            extraWords: seedWords.split(/[\s,]+/).map((w) => w.trim()).filter(Boolean),
+            length: length.trim() === '' ? null : Number(length),
+            special,
+            specialChars: [...new Set(symbols.replace(/\s+/g, '').split(''))],
+          }}
+        />
       )}
     </div>
   )

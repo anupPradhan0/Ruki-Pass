@@ -35,6 +35,7 @@ using exactly this shape:
   "action": "ask" | "crack" | "give_up",
   "questions": ["<short question>", ...],        // ONLY when action == "ask" (1-3 items)
   "strategy": {                                    // ONLY when action == "crack"
+    "candidates": ["<full password guess>", ...],  // CONCRETE guesses, tried exactly as written — your best lever
     "extra_words": ["<seed word>", ...],           // words to build guesses from (a name, pet, team, etc.)
     "use_rules": true,                             // capitalization / leet / common suffixes
     "brute_force": true,                           // build word + numbers (+ optional symbol)
@@ -47,6 +48,10 @@ using exactly this shape:
 }
 
 How the engine works (you only choose the strategy — the engine does the work):
+- "candidates" are your MOST valuable output: real, human-plausible full \
+passwords you construct from what you know (e.g. name "rex" + year 2015 + a \
+symbol -> "Rex2015", "rex@2015", "Rex2015!", "2015rex"). They are hashed exactly \
+as written, so think like the person who chose the password and list your best 10-30.
 - With brute_force + a known length, it places the word, digit groups, and ONE \
 symbol in ANY arrangement, including the symbol BETWEEN digits — so shapes like \
 'ruki123@123' (word+digits+symbol+digits) are fully covered.
@@ -54,10 +59,12 @@ symbol in ANY arrangement, including the symbol BETWEEN digits — so shapes lik
 in special_chars (e.g. ["@"]). Both make the search dramatically faster.
 
 Rules for choosing the action:
-- If you do NOT yet have any candidate word, action "ask" — one short batch of \
-questions (word/name, length, special char). Ask only ONCE.
-- As soon as you have at least one candidate word AND a rough length, action \
-"crack". Do NOT keep asking — never re-ask something already answered above.
+- A "What we ALREADY know" block below lists facts from the form the user filled \
+in. Treat every fact there as ANSWERED — never ask about it again.
+- If those known facts (or the chat) already give you a seed word, go straight to \
+action "crack" — emit "candidates" built from the word + length + symbols. Do NOT ask.
+- Only if you have NO word at all, action "ask" — one short batch (word/name, \
+length, special char). Ask only ONCE.
 - After a failed crack, refine the strategy (different words, special toggled, \
 adjusted length) and crack again — don't fall back to asking.
 - A password with no memorable word and truly random characters may be \
@@ -135,7 +142,32 @@ def _client():
     )
 
 
-def _build_prompt(hash_hex: str, algorithm: str, transcript: list[dict]) -> str:
+def _format_known(known: dict | None) -> list[str]:
+    """Render the facts the user already gave via the form, so the model won't
+    re-ask them (feature A)."""
+    if not known:
+        return []
+    facts = []
+    if known.get("extra_words"):
+        facts.append(f"- Seed/hint word(s): {', '.join(known['extra_words'])}")
+    if isinstance(known.get("length"), int):
+        facts.append(f"- Exact password length: {known['length']}")
+    if known.get("special") in {"yes", "no"}:
+        facts.append(f"- Contains a special character: {known['special']}")
+    if known.get("special_chars"):
+        facts.append(f"- Known symbols: {', '.join(known['special_chars'])}")
+    if not facts:
+        return []
+    return [
+        "What we ALREADY know (from the form) — do NOT ask about these again:",
+        *facts,
+        "",
+    ]
+
+
+def _build_prompt(
+    hash_hex: str, algorithm: str, transcript: list[dict], known: dict | None = None
+) -> str:
     lines = [
         INSTRUCTIONS,
         "",
@@ -144,6 +176,7 @@ def _build_prompt(hash_hex: str, algorithm: str, transcript: list[dict]) -> str:
         "Already failed automatically: wordlist (rockyou ~14M), mutation rules, "
         "and numeric brute-force without hints.",
         "",
+        *_format_known(known),
         "Conversation so far:",
     ]
     if transcript:
@@ -184,10 +217,16 @@ def _extract_json(text: str) -> dict:
         raise AssistantError(f"Model did not return valid JSON: {text[:200]!r}")
 
 
-def decide(hash_hex: str, algorithm: str, transcript: list[dict]) -> Decision:
-    """Ask Gemma for the next step given the conversation so far."""
+def decide(
+    hash_hex: str,
+    algorithm: str,
+    transcript: list[dict],
+    known: dict | None = None,
+) -> Decision:
+    """Ask Gemma for the next step given the conversation so far and any facts
+    the user already supplied via the form (``known``)."""
     client = _client()
-    prompt = _build_prompt(hash_hex, algorithm, transcript)
+    prompt = _build_prompt(hash_hex, algorithm, transcript, known)
 
     try:
         response = client.models.generate_content(model=MODEL, contents=prompt)
@@ -219,8 +258,11 @@ def decide(hash_hex: str, algorithm: str, transcript: list[dict]) -> Decision:
         raise AssistantError(f"Model returned an unknown action: {action!r}")
 
     # Safety net: if the model tries to ask again after the user already
-    # answered, force a crack so it can't loop on questions.
-    user_answered = any(m.get("role") == "user" for m in transcript)
+    # answered — in chat OR via the form's known seed words — force a crack so it
+    # can't loop on questions the user has effectively already answered.
+    user_answered = any(m.get("role") == "user" for m in transcript) or bool(
+        known and known.get("extra_words")
+    )
     if action == "ask" and user_answered:
         action = "crack"
 

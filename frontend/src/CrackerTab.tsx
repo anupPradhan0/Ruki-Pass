@@ -310,7 +310,17 @@ function CrackerTab({ algorithm, hexLength }: Props) {
       )}
 
       {isValid && showAssistant && (
-        <AssistantPanel key={trimmed} hash={trimmed} algorithm={algorithm} />
+        <AssistantPanel
+          key={trimmed}
+          hash={trimmed}
+          algorithm={algorithm}
+          hints={{
+            extraWords: seedWords.split(/[\s,]+/).map((w) => w.trim()).filter(Boolean),
+            length: length.trim() === '' ? null : Number(length),
+            special,
+            specialChars: [...new Set(symbols.replace(/\s+/g, '').split(''))],
+          }}
+        />
       )}
     </div>
   )
