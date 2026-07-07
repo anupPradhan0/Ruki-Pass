@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import CrackerTab from './CrackerTab'
 import Pbkdf2Tab from './Pbkdf2Tab'
@@ -45,7 +45,35 @@ async function fetchProjectStatus(): Promise<ProjectStatus> {
   }
 }
 
-function Navbar({ view, setView }: { view: View; setView: (v: View) => void }) {
+function ThemeIcon({ dark }: { dark: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor"
+      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {dark ? (
+        // sun (click to go light)
+        <>
+          <circle cx="8" cy="8" r="3.2" />
+          <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M13 3l-1 1M4 12l-1 1" />
+        </>
+      ) : (
+        // moon (click to go dark)
+        <path d="M13.5 9.2A5.6 5.6 0 1 1 6.8 2.5a4.4 4.4 0 0 0 6.7 6.7z" />
+      )}
+    </svg>
+  )
+}
+
+function Navbar({
+  view,
+  setView,
+  dark,
+  toggleDark,
+}: {
+  view: View
+  setView: (v: View) => void
+  dark: boolean
+  toggleDark: () => void
+}) {
   return (
     <header className="navbar">
       <button className="brand" onClick={() => setView('home')}>
@@ -77,6 +105,15 @@ function Navbar({ view, setView }: { view: View; setView: (v: View) => void }) {
         <GitHubIcon />
         <span>GitHub</span>
       </a>
+
+      <button
+        className="theme-toggle"
+        onClick={toggleDark}
+        aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+        title="Toggle theme"
+      >
+        <ThemeIcon dark={dark} />
+      </button>
     </header>
   )
 }
@@ -174,10 +211,21 @@ function HashPassView() {
 
 function App() {
   const [view, setView] = useState<View>('home')
+  const [dark, setDark] = useState(
+    () =>
+      localStorage.getItem('theme') === 'dark' ||
+      (localStorage.getItem('theme') === null &&
+        window.matchMedia?.('(prefers-color-scheme: dark)').matches),
+  )
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+    localStorage.setItem('theme', dark ? 'dark' : 'light')
+  }, [dark])
 
   return (
     <div className="app">
-      <Navbar view={view} setView={setView} />
+      <Navbar view={view} setView={setView} dark={dark} toggleDark={() => setDark((d) => !d)} />
 
       <main className="content">
         {view === 'home' ? (
