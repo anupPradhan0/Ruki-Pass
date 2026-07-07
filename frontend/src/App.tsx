@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import CrackerTab from './CrackerTab'
 import Pbkdf2Tab from './Pbkdf2Tab'
+import BcryptTab from './BcryptTab'
 
 const ORG_URL = 'https://github.com/Ruki111'
 const REPO_URL = 'https://github.com/Ruki111/Ruki-Pass'
@@ -11,9 +12,10 @@ const TABS = [
   { algorithm: 'md5', label: 'MD5', hexLength: 32 },
   { algorithm: 'sha1', label: 'SHA-1', hexLength: 40 },
   { algorithm: 'sha256', label: 'SHA-256', hexLength: 64 },
-  // PBKDF2 is salted + iterated, so it uses its own tab component (Pbkdf2Tab),
-  // not the plain hex-hash CrackerTab. hexLength is unused for it.
+  // PBKDF2 and bcrypt are salted + iterated, so they use their own tab
+  // components (not the plain hex-hash CrackerTab). hexLength is unused for them.
   { algorithm: 'pbkdf2', label: 'PBKDF2', hexLength: 0 },
+  { algorithm: 'bcrypt', label: 'bcrypt', hexLength: 0 },
 ] as const
 
 type View = 'home' | 'hashpass'
@@ -161,6 +163,8 @@ function HashPassView() {
 
       {tab.algorithm === 'pbkdf2' ? (
         <Pbkdf2Tab key="pbkdf2" />
+      ) : tab.algorithm === 'bcrypt' ? (
+        <BcryptTab key="bcrypt" />
       ) : (
         <CrackerTab key={tab.algorithm} algorithm={tab.algorithm} hexLength={tab.hexLength} />
       )}

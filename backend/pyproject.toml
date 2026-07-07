@@ -5,6 +5,7 @@ description = "Ruki-Pass backend — hash-cracking research API (MD5 and more)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "bcrypt>=4.0",
     "fastapi>=0.115",
     "google-genai>=2.10.0",
     "python-dotenv>=1.2.2",

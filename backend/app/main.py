@@ -136,6 +136,33 @@ class AssistRequest(BaseModel):
         default_factory=list,
         description="Conversation so far. Empty on the first call.",
     )
+    # PBKDF2-only (ignored otherwise); omit when the hash is an encoded string.
+    salt: str | None = None
+    iterations: int | None = None
+    prf: str = "sha256"
+
+
+def _dispatch_crack(
+    hash: str,
+    algorithm: str | None,
+    *,
+    salt: str | None = None,
+    iterations: int | None = None,
+    prf: str = "sha256",
+    max_candidates: int | None = None,
+    **opts,
+) -> cracker.CrackResult:
+    """Route a crack request to the right engine by algorithm. bcrypt and PBKDF2
+    keep their own low candidate ceilings — the max_candidates override applies
+    only to plain hashes. Raises ValueError on an unusable hash/target."""
+    if algorithm == "bcrypt":
+        return cracker.crack_bcrypt(hashing.validate_bcrypt_hash(hash), **opts)
+    if algorithm == "pbkdf2":
+        target = hashing.build_pbkdf2_target(hash, salt, iterations, prf)
+        return cracker.crack_pbkdf2(target, **opts)
+    if max_candidates is not None:
+        opts["max_candidates"] = max_candidates
+    return cracker.crack(hash, algorithm=algorithm, **opts)
 
 
 class AssistResponse(BaseModel):
@@ -206,9 +233,13 @@ def assist(req: AssistRequest) -> AssistResponse:
         # action == "crack": run the real engine with the model's strategy.
         s = decision.strategy
         try:
-            result = cracker.crack(
+            result = _dispatch_crack(
                 req.hash,
-                algorithm=req.algorithm,
+                req.algorithm,
+                salt=req.salt,
+                iterations=req.iterations,
+                prf=req.prf,
+                max_candidates=ASSIST_MAX_CANDIDATES,
                 use_rules=bool(s.get("use_rules", True)),
                 extra_words=[str(w) for w in s.get("extra_words", [])],
                 brute_force=bool(s.get("brute_force", False)),
@@ -217,7 +248,6 @@ def assist(req: AssistRequest) -> AssistResponse:
                 if s.get("special") in {"yes", "no", "unknown"}
                 else "unknown",
                 special_chars=[str(c) for c in s.get("special_chars", [])],
-                max_candidates=ASSIST_MAX_CANDIDATES,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -268,34 +298,21 @@ def crack(req: CrackRequest) -> CrackResponse:
     via the salt/iterations/prf fields.
     """
     try:
-        if req.algorithm == "pbkdf2":
-            target = hashing.build_pbkdf2_target(
-                req.hash, req.salt, req.iterations, req.prf
-            )
-            result = cracker.crack_pbkdf2(
-                target,
-                use_rules=req.use_rules,
-                extra_words=req.extra_words,
-                brute_force=req.brute_force,
-                brute_max_digits=req.brute_max_digits,
-                length=req.length,
-                special=req.special,
-                brute_around=req.brute_around,
-                special_chars=req.special_chars,
-            )
-        else:
-            result = cracker.crack(
-                req.hash,
-                algorithm=req.algorithm,
-                use_rules=req.use_rules,
-                extra_words=req.extra_words,
-                brute_force=req.brute_force,
-                brute_max_digits=req.brute_max_digits,
-                length=req.length,
-                special=req.special,
-                brute_around=req.brute_around,
-                special_chars=req.special_chars,
-            )
+        result = _dispatch_crack(
+            req.hash,
+            req.algorithm,
+            salt=req.salt,
+            iterations=req.iterations,
+            prf=req.prf,
+            use_rules=req.use_rules,
+            extra_words=req.extra_words,
+            brute_force=req.brute_force,
+            brute_max_digits=req.brute_max_digits,
+            length=req.length,
+            special=req.special,
+            brute_around=req.brute_around,
+            special_chars=req.special_chars,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

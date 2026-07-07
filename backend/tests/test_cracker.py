@@ -253,6 +253,34 @@ def test_pbkdf2_iterations_cap():
         raise AssertionError("expected ValueError for iterations over the cap")
 
 
+def test_bcrypt_crack():
+    import bcrypt as _bcrypt
+
+    hashed = _bcrypt.hashpw(b"dragon", _bcrypt.gensalt(4)).decode()
+    result = cracker.crack_bcrypt(hashed, wordlist=WORDS)
+    assert result.found
+    assert result.password == "dragon"
+    assert result.algorithm == "bcrypt"
+
+
+def test_bcrypt_example_hash_is_valid():
+    # The exact hash the frontend "Try an example" button inserts — guard that
+    # it really is bcrypt("password") so the example never silently breaks.
+    example = "$2b$04$MvjLNNutkRqI/ZFxl3bR8uJZ790wRypqJSJhrmaUYsX7qyucqiqcW"
+    assert hashing.is_bcrypt_hash(example)
+    assert hashing.bcrypt_matches(example, "password")
+    assert not hashing.bcrypt_matches(example, "wrong")
+
+
+def test_bcrypt_invalid_hash_rejected():
+    try:
+        hashing.validate_bcrypt_hash("not-a-bcrypt-hash")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for non-bcrypt input")
+
+
 def test_rules_off_skips_mutations():
     target = hashlib.md5(b"Mors123").hexdigest()
     # With rules off and the seed only tried verbatim, "Mors123" won't be built.

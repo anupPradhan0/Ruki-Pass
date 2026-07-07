@@ -174,3 +174,62 @@ def pbkdf2_matches(target: Pbkdf2Target, password: str) -> bool:
         target.dklen,
     )
     return hmac.compare_digest(derived, target.digest)
+
+
+# ---------------------------------------------------------------------------
+# bcrypt — another slow, salted hash. Like PBKDF2 it can't be reversed and each
+# guess is expensive, but its 60-char string is fully self-contained
+# ($2<ver>$<cost>$<22-char salt><31-char digest>), so the user pastes one value
+# and nothing else. bcrypt isn't in the stdlib, so we lean on the `bcrypt`
+# package (imported lazily, with a clear message if it's not installed).
+# ---------------------------------------------------------------------------
+
+# $2a$/$2b$/$2x$/$2y$ + two-digit cost + 53 base64-ish chars = 60 total.
+_BCRYPT_RE = re.compile(r"^\$2[abxy]\$\d{2}\$[./A-Za-z0-9]{53}$")
+
+
+def _import_bcrypt():
+    try:
+        import bcrypt
+    except ImportError as exc:  # pragma: no cover - only if dep is missing
+        raise ValueError(
+            "bcrypt support needs the 'bcrypt' package. Run 'uv add bcrypt' "
+            "(or 'uv sync') in the backend/ directory, then restart the server."
+        ) from exc
+    return bcrypt
+
+
+def is_bcrypt_hash(text: str) -> bool:
+    """True if ``text`` looks like a bcrypt hash string."""
+    return bool(_BCRYPT_RE.match(text.strip()))
+
+
+def bcrypt_cost(hashed: str) -> int | None:
+    """The work factor embedded in a bcrypt hash (e.g. 12), or None if unclear."""
+    parts = hashed.strip().split("$")
+    if len(parts) >= 3 and parts[2].isdigit():
+        return int(parts[2])
+    return None
+
+
+def validate_bcrypt_hash(text: str) -> str:
+    """Return the cleaned bcrypt hash, or raise ValueError if it's malformed or
+    the bcrypt package isn't available."""
+    hashed = text.strip()
+    if not is_bcrypt_hash(hashed):
+        raise ValueError(
+            "Not a valid bcrypt hash — expected something like "
+            "'$2b$12$...' (60 characters)."
+        )
+    _import_bcrypt()  # fail early with a clear message if the dep is missing
+    return hashed
+
+
+def bcrypt_matches(hashed: str, password: str) -> bool:
+    """True if ``password`` verifies against the bcrypt ``hashed`` string."""
+    bcrypt = _import_bcrypt()
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        # A candidate with e.g. a null byte, or a malformed hash — not a match.
+        return False
