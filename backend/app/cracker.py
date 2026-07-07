@@ -18,6 +18,9 @@ from . import hashing, mutations
 
 WORDLIST_DIR = Path(__file__).parent / "wordlists"
 COMMON_WORDLIST = WORDLIST_DIR / "common.txt"
+# Plaintexts learned from the hash generator — confirmed real passwords, so the
+# cracker tries them (and their mutations) first.
+LEARNED_WORDLIST = WORDLIST_DIR / "learned.txt"
 
 # Preferred wordlists, largest/best first. The first one that exists on disk is
 # used by default. rockyou (~14M leaked passwords from SecLists) is fetched via
@@ -45,6 +48,21 @@ DEFAULT_PBKDF2_MAX_CANDIDATES = 20_000
 DEFAULT_BCRYPT_MAX_CANDIDATES = 5_000
 
 _HEX_RE = re.compile(r"^[0-9a-f]+$")
+
+
+def learn_password(text: str) -> bool:
+    """Append a known plaintext to the learned wordlist so future cracks try it
+    first. Returns True if it was newly added. Best-effort dedup by scanning the
+    file — ponytail: fine at research scale; index it if learned.txt gets huge."""
+    word = text.strip()
+    if not word or "\n" in word or "\r" in word:
+        return False
+    if LEARNED_WORDLIST.exists() and word in set(iter_wordlist(LEARNED_WORDLIST)):
+        return False
+    LEARNED_WORDLIST.parent.mkdir(parents=True, exist_ok=True)
+    with LEARNED_WORDLIST.open("a", encoding="utf-8") as fh:
+        fh.write(word + "\n")
+    return True
 
 
 def default_wordlist() -> Path:
@@ -110,6 +128,13 @@ def build_candidates(
     wordlist — so a hit on a custom password is fast.
     """
     extra_words = extra_words or []
+
+    # 0. Passwords learned from the hash generator — confirmed real, cheapest
+    # high-value guesses, so try them (and their mutations) before anything else.
+    if LEARNED_WORDLIST.exists():
+        yield from iter_wordlist(LEARNED_WORDLIST)
+        if use_rules:
+            yield from mutations.mutate_all(iter_wordlist(LEARNED_WORDLIST))
 
     if use_rules:
         # 1. User-provided seed words, mutated (e.g. "mors" -> "Mors123").

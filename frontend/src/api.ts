@@ -65,7 +65,43 @@ export type CrackResponse = {
   wordlist: string | null
 }
 
+export type HashResponse = { algorithm: string; hash: string; saved: boolean }
+
+// Algorithms the generator can produce (mirrors backend HASHABLE_ALGORITHMS).
+export const HASHABLE = [
+  'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'bcrypt', 'pbkdf2',
+] as const
+
+export async function hashText(
+  text: string,
+  algorithm: string,
+  save: boolean,
+): Promise<HashResponse> {
+  const res = await fetch(`${API_BASE}/api/hash`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, algorithm, save }),
+  })
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`
+    try {
+      const body = await res.json()
+      if (body?.detail) detail = body.detail
+    } catch {
+      /* keep generic message */
+    }
+    throw new Error(detail)
+  }
+  return res.json()
+}
+
 export type Special = 'unknown' | 'yes' | 'no'
+
+export const SPECIAL_OPTIONS = [
+  { value: 'unknown', label: 'Not sure' },
+  { value: 'no', label: 'No (none)' },
+  { value: 'yes', label: 'Yes (has one)' },
+] as const
 
 export type CrackOptions = {
   algorithm?: string

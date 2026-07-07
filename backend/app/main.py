@@ -289,6 +289,44 @@ def algorithms() -> dict[str, list[str]]:
     return {"algorithms": hashing.supported_algorithms()}
 
 
+class HashRequest(BaseModel):
+    text: str = Field(..., description="The plaintext to hash.")
+    algorithm: str = Field(..., description="Which algorithm to hash with.")
+    save: bool = Field(
+        True,
+        description="Add the plaintext to the learned wordlist to improve cracking.",
+    )
+
+
+class HashResponse(BaseModel):
+    algorithm: str
+    hash: str
+    saved: bool
+
+
+@app.get("/api/hashable")
+def hashable() -> dict[str, list[str]]:
+    """Algorithms the hash generator can produce."""
+    return {"algorithms": hashing.HASHABLE_ALGORITHMS}
+
+
+@app.post("/api/hash", response_model=HashResponse)
+def make_hash(req: HashRequest) -> HashResponse:
+    """Hash a plaintext with the chosen algorithm (the reverse of cracking).
+
+    When ``save`` is on, the plaintext is added to the learned wordlist so future
+    cracks try it first — a known-password feedback loop.
+    """
+    if not req.text:
+        raise HTTPException(status_code=422, detail="text must not be empty")
+    try:
+        digest = hashing.generate_hash(req.algorithm, req.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    saved = cracker.learn_password(req.text) if req.save else False
+    return HashResponse(algorithm=req.algorithm, hash=digest, saved=saved)
+
+
 @app.post("/api/crack", response_model=CrackResponse)
 def crack(req: CrackRequest) -> CrackResponse:
     """Attempt to recover the plaintext behind a hash using the wordlist.

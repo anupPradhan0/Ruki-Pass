@@ -12,6 +12,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -233,3 +234,32 @@ def bcrypt_matches(hashed: str, password: str) -> bool:
     except ValueError:
         # A candidate with e.g. a null byte, or a malformed hash — not a match.
         return False
+
+
+# ---------------------------------------------------------------------------
+# Hash generation — the reverse of cracking: turn a plaintext into a hash with a
+# chosen algorithm. bcrypt/PBKDF2 get sensible defaults + a random salt.
+# ---------------------------------------------------------------------------
+
+# Everything the generator can produce (registry hashes + the two slow KDFs).
+HASHABLE_ALGORITHMS = [*ALGORITHMS, "bcrypt", "pbkdf2"]
+
+PBKDF2_DEFAULT_ITERATIONS = 260_000  # Django's modern default
+
+
+def generate_hash(algorithm: str, text: str) -> str:
+    """Hash ``text`` with ``algorithm`` and return a string. Plain hashes are
+    hex; bcrypt and PBKDF2 return their self-contained encoded strings."""
+    if algorithm in ALGORITHMS:
+        return compute(algorithm, text)
+    if algorithm == "bcrypt":
+        bcrypt = _import_bcrypt()
+        return bcrypt.hashpw(text.encode("utf-8"), bcrypt.gensalt()).decode()
+    if algorithm == "pbkdf2":
+        salt = base64.b64encode(os.urandom(12)).decode().replace("$", "")
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", text.encode("utf-8"), salt.encode("utf-8"),
+            PBKDF2_DEFAULT_ITERATIONS,
+        )
+        return f"pbkdf2_sha256${PBKDF2_DEFAULT_ITERATIONS}${salt}${base64.b64encode(dk).decode()}"
+    raise ValueError(f"unsupported algorithm: {algorithm!r}")
