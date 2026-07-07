@@ -39,6 +39,11 @@ DEFAULT_MAX_CANDIDATES = 12_000_000
 # path. A hit on a targeted guess still returns immediately.
 DEFAULT_PBKDF2_MAX_CANDIDATES = 20_000
 
+# bcrypt is slower still (a full Blowfish key schedule per guess, cost 2^work),
+# so the ceiling is lower again — realistically only hint words + rules will
+# finish. A hit still returns immediately.
+DEFAULT_BCRYPT_MAX_CANDIDATES = 5_000
+
 _HEX_RE = re.compile(r"^[0-9a-f]+$")
 
 
@@ -298,6 +303,76 @@ def crack_pbkdf2(
         found=False,
         hash=tag,
         algorithm="pbkdf2",
+        attempts=attempts,
+        duration_ms=(time.perf_counter() - start) * 1000,
+        wordlist_exhausted=not capped,
+        wordlist=label,
+        capped=capped,
+    )
+
+
+def crack_bcrypt(
+    hashed: str,
+    wordlist: Iterable[str] | None = None,
+    use_rules: bool = True,
+    extra_words: list[str] | None = None,
+    rule_seed_limit: int = DEFAULT_RULE_SEED_LIMIT,
+    brute_force: bool = False,
+    brute_max_digits: int = 5,
+    length: int | None = None,
+    special: str = "unknown",
+    brute_around: bool = False,
+    special_chars: list[str] | None = None,
+    max_candidates: int = DEFAULT_BCRYPT_MAX_CANDIDATES,
+) -> CrackResult:
+    """Recover the password behind a bcrypt ``hashed`` string (self-contained:
+    version, cost, salt and digest are all embedded).
+
+    Mirrors ``crack`` for the shared options, but bcrypt is the slowest target,
+    so the candidate ceiling is the lowest — a strong hint word is essentially
+    required. Returns a CrackResult with algorithm ``"bcrypt"``.
+    """
+    cost = hashing.bcrypt_cost(hashed)
+    label = f"bcrypt (cost {cost})" if cost is not None else "bcrypt"
+    if wordlist is not None:
+        candidates: Iterable[str] = wordlist
+    else:
+        candidates = build_candidates(
+            use_rules,
+            extra_words,
+            rule_seed_limit,
+            brute_force=brute_force,
+            brute_max_digits=brute_max_digits,
+            length=length,
+            special=special,
+            brute_around=brute_around,
+            special_chars=special_chars,
+        )
+
+    attempts = 0
+    capped = False
+    start = time.perf_counter()
+    for word in candidates:
+        attempts += 1
+        if hashing.bcrypt_matches(hashed, word):
+            return CrackResult(
+                found=True,
+                hash="bcrypt",
+                algorithm="bcrypt",
+                password=word,
+                attempts=attempts,
+                duration_ms=(time.perf_counter() - start) * 1000,
+                wordlist_exhausted=False,
+                wordlist=label,
+            )
+        if attempts >= max_candidates:
+            capped = True
+            break
+
+    return CrackResult(
+        found=False,
+        hash="bcrypt",
+        algorithm="bcrypt",
         attempts=attempts,
         duration_ms=(time.perf_counter() - start) * 1000,
         wordlist_exhausted=not capped,

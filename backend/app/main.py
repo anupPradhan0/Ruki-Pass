@@ -268,7 +268,20 @@ def crack(req: CrackRequest) -> CrackResponse:
     via the salt/iterations/prf fields.
     """
     try:
-        if req.algorithm == "pbkdf2":
+        if req.algorithm == "bcrypt":
+            hashed = hashing.validate_bcrypt_hash(req.hash)
+            result = cracker.crack_bcrypt(
+                hashed,
+                use_rules=req.use_rules,
+                extra_words=req.extra_words,
+                brute_force=req.brute_force,
+                brute_max_digits=req.brute_max_digits,
+                length=req.length,
+                special=req.special,
+                brute_around=req.brute_around,
+                special_chars=req.special_chars,
+            )
+        elif req.algorithm == "pbkdf2":
             target = hashing.build_pbkdf2_target(
                 req.hash, req.salt, req.iterations, req.prf
             )
