@@ -649,6 +649,71 @@ code {
   box-shadow: var(--sh-sm);
 }
 
+/* ---------- Dropdown (custom <select> replacement) ---------- */
+.dropdown {
+  position: relative;
+}
+
+.dropdown-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--bd);
+  padding: 0.6rem 0.7rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dropdown-btn.open {
+  box-shadow: var(--sh-sm);
+}
+
+.dropdown-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--paper);
+  border: var(--bd);
+  box-shadow: var(--sh);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.dropdown-item {
+  width: 100%;
+  text-align: left;
+  appearance: none;
+  cursor: pointer;
+  background: var(--paper);
+  color: var(--ink);
+  border: none;
+  border-bottom: 2px solid var(--ink);
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 0.55rem 0.7rem;
+}
+
+.dropdown-list li:last-child .dropdown-item {
+  border-bottom: none;
+}
+
+.dropdown-item:hover,
+.dropdown-item.sel {
+  background: var(--ink);
+  color: var(--paper);
+}
+
 /* ---------- Crack button ---------- */
 .crack-btn {
   display: flex;

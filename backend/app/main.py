@@ -140,6 +140,11 @@ class AssistRequest(BaseModel):
     salt: str | None = None
     iterations: int | None = None
     prf: str = "sha256"
+    # What the user already entered in the form — so the AI won't re-ask it (A).
+    extra_words: list[str] = Field(default_factory=list)
+    length: int | None = None
+    special: Literal["unknown", "yes", "no"] = "unknown"
+    special_chars: list[str] = Field(default_factory=list)
 
 
 def _dispatch_crack(
@@ -206,9 +211,20 @@ def assist(req: AssistRequest) -> AssistResponse:
         for m in req.transcript
     ]
 
+    # Facts the user already gave via the form — passed to the model so it won't
+    # re-ask them, and merged into every crack so nothing is dropped (A).
+    known = {
+        "extra_words": [str(w) for w in req.extra_words],
+        "length": req.length,
+        "special": req.special,
+        "special_chars": [str(c) for c in req.special_chars],
+    }
+
     for _ in range(MAX_CRACK_ATTEMPTS_PER_TURN):
         try:
-            decision = assistant.decide(req.hash, req.algorithm or "md5", transcript)
+            decision = assistant.decide(
+                req.hash, req.algorithm or "md5", transcript, known
+            )
         except assistant.AssistantError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -230,8 +246,16 @@ def assist(req: AssistRequest) -> AssistResponse:
                 transcript=[TranscriptMessage(**m) for m in transcript],
             )
 
-        # action == "crack": run the real engine with the model's strategy.
+        # action == "crack": run the real engine with the model's strategy,
+        # merged with the form facts so known info is never dropped, and the
+        # model's concrete guesses tried first (B).
         s = decision.strategy
+        seeds = list(
+            dict.fromkeys([*known["extra_words"], *[str(w) for w in s.get("extra_words", [])]])
+        )
+        length = s.get("length") if isinstance(s.get("length"), int) else known["length"]
+        special = s.get("special") if s.get("special") in {"yes", "no"} else known["special"]
+        chars = [str(c) for c in s.get("special_chars", [])] or known["special_chars"]
         try:
             result = _dispatch_crack(
                 req.hash,
@@ -241,19 +265,20 @@ def assist(req: AssistRequest) -> AssistResponse:
                 prf=req.prf,
                 max_candidates=ASSIST_MAX_CANDIDATES,
                 use_rules=bool(s.get("use_rules", True)),
-                extra_words=[str(w) for w in s.get("extra_words", [])],
+                extra_words=seeds,
+                direct_candidates=[str(c) for c in s.get("candidates", [])],
                 brute_force=bool(s.get("brute_force", False)),
-                length=s.get("length") if isinstance(s.get("length"), int) else None,
-                special=s.get("special", "unknown")
-                if s.get("special") in {"yes", "no", "unknown"}
-                else "unknown",
-                special_chars=[str(c) for c in s.get("special_chars", [])],
+                length=length if isinstance(length, int) else None,
+                special=special,
+                special_chars=chars,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         note = str(s.get("note", "")) or "tried a strategy"
         if result.found:
+            # Feed the win back into the wordlist so future cracks get it free (C).
+            cracker.learn_password(result.password)
             transcript.append(
                 {"role": "system", "text": f"Crack attempt ({note}): FOUND '{result.password}'."}
             )
@@ -287,6 +312,44 @@ def assist(req: AssistRequest) -> AssistResponse:
 def algorithms() -> dict[str, list[str]]:
     """List every hash algorithm the cracker currently supports."""
     return {"algorithms": hashing.supported_algorithms()}
+
+
+class HashRequest(BaseModel):
+    text: str = Field(..., description="The plaintext to hash.")
+    algorithm: str = Field(..., description="Which algorithm to hash with.")
+    save: bool = Field(
+        True,
+        description="Add the plaintext to the learned wordlist to improve cracking.",
+    )
+
+
+class HashResponse(BaseModel):
+    algorithm: str
+    hash: str
+    saved: bool
+
+
+@app.get("/api/hashable")
+def hashable() -> dict[str, list[str]]:
+    """Algorithms the hash generator can produce."""
+    return {"algorithms": hashing.HASHABLE_ALGORITHMS}
+
+
+@app.post("/api/hash", response_model=HashResponse)
+def make_hash(req: HashRequest) -> HashResponse:
+    """Hash a plaintext with the chosen algorithm (the reverse of cracking).
+
+    When ``save`` is on, the plaintext is added to the learned wordlist so future
+    cracks try it first — a known-password feedback loop.
+    """
+    if not req.text:
+        raise HTTPException(status_code=422, detail="text must not be empty")
+    try:
+        digest = hashing.generate_hash(req.algorithm, req.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    saved = cracker.learn_password(req.text) if req.save else False
+    return HashResponse(algorithm=req.algorithm, hash=digest, saved=saved)
 
 
 @app.post("/api/crack", response_model=CrackResponse)

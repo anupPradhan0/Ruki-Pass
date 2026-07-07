@@ -9,6 +9,13 @@ type Props = {
   salt?: string | null
   iterations?: number | null
   prf?: string
+  // What the user already typed in the form, so the AI skips re-asking it.
+  hints?: {
+    extraWords?: string[]
+    length?: number | null
+    special?: string
+    specialChars?: string[]
+  }
 }
 
 // Mask anything that looks like a key/token in any text we render.
@@ -32,7 +39,7 @@ function looksLikeSecret(s: string): boolean {
   )
 }
 
-function AssistantPanel({ hash, algorithm, salt, iterations, prf }: Props) {
+function AssistantPanel({ hash, algorithm, salt, iterations, prf, hints }: Props) {
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([])
   const [answer, setAnswer] = useState('')
   const [started, setStarted] = useState(false)
@@ -44,7 +51,16 @@ function AssistantPanel({ hash, algorithm, salt, iterations, prf }: Props) {
   })
 
   const turn = useMutation({
-    mutationFn: (t: TranscriptMessage[]) => assist(hash, algorithm, t, { salt, iterations, prf }),
+    mutationFn: (t: TranscriptMessage[]) =>
+      assist(hash, algorithm, t, {
+        salt,
+        iterations,
+        prf,
+        extraWords: hints?.extraWords,
+        length: hints?.length,
+        special: hints?.special,
+        specialChars: hints?.specialChars,
+      }),
     onSuccess: (res) => setTranscript(res.transcript),
   })
 

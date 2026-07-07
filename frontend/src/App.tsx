@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import CrackerTab from './CrackerTab'
 import Pbkdf2Tab from './Pbkdf2Tab'
 import BcryptTab from './BcryptTab'
+import Hasher from './Hasher'
 
 const ORG_URL = 'https://github.com/Ruki111'
 const REPO_URL = 'https://github.com/Ruki111/Ruki-Pass'
@@ -18,7 +19,7 @@ const TABS = [
   { algorithm: 'bcrypt', label: 'bcrypt', hexLength: 0 },
 ] as const
 
-type View = 'home' | 'hashpass'
+type View = 'home' | 'hashpass' | 'makehash'
 
 function GitHubIcon() {
   return (
@@ -92,6 +93,12 @@ function Navbar({
           onClick={() => setView('hashpass')}
         >
           Hash Pass
+        </button>
+        <button
+          className={`nav-link ${view === 'makehash' ? 'active' : ''}`}
+          onClick={() => setView('makehash')}
+        >
+          Make Hash
         </button>
       </nav>
 
@@ -230,6 +237,8 @@ function App() {
       <main className="content">
         {view === 'home' ? (
           <HomeView goToHashPass={() => setView('hashpass')} />
+        ) : view === 'makehash' ? (
+          <Hasher />
         ) : (
           <HashPassView />
         )}

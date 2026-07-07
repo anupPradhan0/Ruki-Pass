@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { crackHash, type Special } from './api'
+import { crackHash, type Special, SPECIAL_OPTIONS } from './api'
 import AssistantPanel from './AssistantPanel'
+import Dropdown from './Dropdown'
 
 // A real bcrypt("password") at cost 4 — low cost means it cracks instantly, a
 // satisfying first try. Verified by a backend test so it can't silently break.
@@ -200,14 +201,11 @@ function BcryptTab() {
                     <input type="number" min={1} max={64} placeholder="e.g. 9"
                       value={length} onChange={(e) => setLength(e.target.value)} />
                   </label>
-                  <label className="brute-field">
+                  <div className="brute-field">
                     <span>Special characters?</span>
-                    <select value={special} onChange={(e) => setSpecial(e.target.value as Special)}>
-                      <option value="unknown">Not sure</option>
-                      <option value="no">No (none)</option>
-                      <option value="yes">Yes (has one)</option>
-                    </select>
-                  </label>
+                    <Dropdown value={special} onChange={(v) => setSpecial(v as Special)}
+                      options={SPECIAL_OPTIONS} />
+                  </div>
                 </div>
                 {special === 'yes' && (
                   <label className="brute-field">
@@ -297,7 +295,17 @@ function BcryptTab() {
       )}
 
       {isValid && showAssistant && (
-        <AssistantPanel key={trimmed} hash={trimmed} algorithm="bcrypt" />
+        <AssistantPanel
+          key={trimmed}
+          hash={trimmed}
+          algorithm="bcrypt"
+          hints={{
+            extraWords: seedWords.split(/[\s,]+/).map((w) => w.trim()).filter(Boolean),
+            length: length.trim() === '' ? null : Number(length),
+            special,
+            specialChars: [...new Set(symbols.replace(/\s+/g, '').split(''))],
+          }}
+        />
       )}
     </div>
   )

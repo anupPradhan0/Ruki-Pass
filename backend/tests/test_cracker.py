@@ -281,6 +281,35 @@ def test_bcrypt_invalid_hash_rejected():
         raise AssertionError("expected ValueError for non-bcrypt input")
 
 
+def test_generate_hash_roundtrips():
+    # Plain hash matches hashlib; generated bcrypt/pbkdf2 verify against the text.
+    assert hashing.generate_hash("sha256", "hunter2") == hashlib.sha256(b"hunter2").hexdigest()
+    assert hashing.bcrypt_matches(hashing.generate_hash("bcrypt", "hunter2"), "hunter2")
+    target = hashing.build_pbkdf2_target(hashing.generate_hash("pbkdf2", "hunter2"))
+    assert hashing.pbkdf2_matches(target, "hunter2")
+
+
+def test_learn_password_appends(tmp_path, monkeypatch):
+    wl = tmp_path / "learned.txt"
+    monkeypatch.setattr(cracker, "LEARNED_WORDLIST", wl)
+    assert cracker.learn_password("s3cret!") is True
+    assert cracker.learn_password("s3cret!") is False  # dedup
+    assert "s3cret!" in set(cracker.iter_wordlist(wl))
+
+
+def test_direct_candidates_tried_first():
+    # An AI guess the wordlist/rules would never build — supplied directly, it
+    # must still be found (and immediately, since direct candidates go first).
+    weird = "Rex@2015zzz"
+    target = hashlib.md5(weird.encode()).hexdigest()
+    result = cracker.crack(
+        target, algorithm="md5", use_rules=False, direct_candidates=[weird]
+    )
+    assert result.found
+    assert result.password == weird
+    assert result.attempts == 1
+
+
 def test_rules_off_skips_mutations():
     target = hashlib.md5(b"Mors123").hexdigest()
     # With rules off and the seed only tried verbatim, "Mors123" won't be built.
