@@ -5,6 +5,10 @@ import { assist, getAssistStatus, type TranscriptMessage } from './api'
 type Props = {
   hash: string
   algorithm: string
+  // PBKDF2 only — the assistant needs the salt/iterations to run a crack.
+  salt?: string | null
+  iterations?: number | null
+  prf?: string
 }
 
 // Mask anything that looks like a key/token in any text we render.
@@ -28,7 +32,7 @@ function looksLikeSecret(s: string): boolean {
   )
 }
 
-function AssistantPanel({ hash, algorithm }: Props) {
+function AssistantPanel({ hash, algorithm, salt, iterations, prf }: Props) {
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([])
   const [answer, setAnswer] = useState('')
   const [started, setStarted] = useState(false)
@@ -40,7 +44,7 @@ function AssistantPanel({ hash, algorithm }: Props) {
   })
 
   const turn = useMutation({
-    mutationFn: (t: TranscriptMessage[]) => assist(hash, algorithm, t),
+    mutationFn: (t: TranscriptMessage[]) => assist(hash, algorithm, t, { salt, iterations, prf }),
     onSuccess: (res) => setTranscript(res.transcript),
   })
 

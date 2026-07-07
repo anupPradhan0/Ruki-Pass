@@ -27,11 +27,19 @@ export async function assist(
   hash: string,
   algorithm: string,
   transcript: TranscriptMessage[],
+  opts: { salt?: string | null; iterations?: number | null; prf?: string } = {},
 ): Promise<AssistResponse> {
   const res = await fetch(`${API_BASE}/api/assist`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ hash: hash.trim(), algorithm, transcript }),
+    body: JSON.stringify({
+      hash: hash.trim(),
+      algorithm,
+      transcript,
+      salt: opts.salt ?? null,
+      iterations: opts.iterations ?? null,
+      prf: opts.prf ?? 'sha256',
+    }),
   })
   if (!res.ok) {
     let detail = `Request failed (${res.status})`

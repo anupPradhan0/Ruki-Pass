@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { crackHash, type Special } from './api'
+import AssistantPanel from './AssistantPanel'
 
 // RFC 6070 test vector: PBKDF2-HMAC-SHA1("password", "salt", 1, 20). One
 // iteration + a wordlist word means it cracks instantly — a satisfying first try.
@@ -51,6 +52,7 @@ function Pbkdf2Tab() {
   const [symbols, setSymbols] = useState('')
   const [bruteAround, setBruteAround] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [showAssistant, setShowAssistant] = useState(false)
 
   const trimmed = hash.trim()
   const isEncoded = ENCODED_RE.test(trimmed)
@@ -339,8 +341,26 @@ function Pbkdf2Tab() {
               Open <strong>Advanced options</strong> and add a <strong>hint word</strong> —
               that's the practical way to crack it.
             </p>
+            <button
+              type="button"
+              className="assist-cta"
+              onClick={() => setShowAssistant((v) => !v)}
+            >
+              🤖 {showAssistant ? 'Hide AI assistant' : 'Ask the AI assistant'}
+            </button>
           </div>
         )
+      )}
+
+      {isValid && showAssistant && (
+        <AssistantPanel
+          key={trimmed}
+          hash={trimmed}
+          algorithm="pbkdf2"
+          salt={isEncoded ? null : salt.trim()}
+          iterations={isEncoded ? null : Number(iterations)}
+          prf={prf}
+        />
       )}
     </div>
   )

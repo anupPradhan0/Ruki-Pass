@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { crackHash, type Special } from './api'
+import AssistantPanel from './AssistantPanel'
 
 // A real bcrypt("password") at cost 4 — low cost means it cracks instantly, a
 // satisfying first try. Verified by a backend test so it can't silently break.
@@ -40,6 +41,7 @@ function BcryptTab() {
   const [symbols, setSymbols] = useState('')
   const [bruteAround, setBruteAround] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [showAssistant, setShowAssistant] = useState(false)
 
   const trimmed = hash.trim()
   const isValid = BCRYPT_RE.test(trimmed)
@@ -283,8 +285,19 @@ function BcryptTab() {
               Open <strong>Advanced options</strong> and add a <strong>hint word</strong> —
               that's the only practical way to crack it.
             </p>
+            <button
+              type="button"
+              className="assist-cta"
+              onClick={() => setShowAssistant((v) => !v)}
+            >
+              🤖 {showAssistant ? 'Hide AI assistant' : 'Ask the AI assistant'}
+            </button>
           </div>
         )
+      )}
+
+      {isValid && showAssistant && (
+        <AssistantPanel key={trimmed} hash={trimmed} algorithm="bcrypt" />
       )}
     </div>
   )
