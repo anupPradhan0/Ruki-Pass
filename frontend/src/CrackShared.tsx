@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import type { UseMutationResult } from '@tanstack/react-query'
-import { type CrackResponse, type Special, SPECIAL_OPTIONS } from './api'
+import { useEffect, useState } from 'react'
+import { useMutation, type UseMutationResult } from '@tanstack/react-query'
+import { type CrackResponse, type Special, SPECIAL_OPTIONS, verifyHash } from './api'
+import { recordHistory } from './history'
 import Dropdown from './Dropdown'
 
 // Shared by every crack tab (MD5/SHA/PBKDF2/bcrypt): icon set, the "hint
@@ -178,6 +179,15 @@ export function AdvancedOptions({
   )
 }
 
+function CurlButton({ curl }: { curl: string }) {
+  const { copied, copy } = useCopy()
+  return (
+    <button type="button" className="link-btn curl-btn" onClick={() => copy(curl)}>
+      {copied ? 'Copied' : 'Copy as curl'}
+    </button>
+  )
+}
+
 export function ResultPanel({
   mutation,
   copy,
@@ -186,6 +196,7 @@ export function ResultPanel({
   setShowAssistant,
   loadingMessage,
   notFoundTip,
+  curl,
 }: {
   mutation: UseMutationResult<CrackResponse, Error, void>
   copy: (text: string) => void
@@ -194,7 +205,21 @@ export function ResultPanel({
   setShowAssistant: (fn: (v: boolean) => boolean) => void
   loadingMessage: React.ReactNode
   notFoundTip: React.ReactNode
+  curl?: string
 }) {
+  const result = mutation.data
+  // Record every successful crack into session history (once per new result).
+  useEffect(() => {
+    if (result?.found && result.password) {
+      recordHistory({
+        kind: 'crack',
+        algorithm: result.algorithm,
+        input: result.hash,
+        output: result.password,
+      })
+    }
+  }, [result])
+
   if (mutation.isPending) {
     return (
       <div className="result loading">
@@ -213,7 +238,6 @@ export function ResultPanel({
     )
   }
 
-  const result = mutation.data
   if (!result) return null
 
   if (result.found) {
@@ -232,6 +256,7 @@ export function ResultPanel({
             ? `${result.duration_ms.toFixed(0)} ms`
             : `${(result.duration_ms / 1000).toFixed(1)} s`}{' '}
           · {result.wordlist ?? 'n/a'}
+          {curl && <> · <CurlButton curl={curl} /></>}
         </p>
       </div>
     )
@@ -242,9 +267,82 @@ export function ResultPanel({
       <span className="result-tag">Not found</span>
       <p>Tried {result.attempts.toLocaleString()} candidates — no match in {result.wordlist ?? 'the wordlist'}.</p>
       <p className="result-tip">{notFoundTip}</p>
-      <button type="button" className="assist-cta" onClick={() => setShowAssistant((v) => !v)}>
-        🤖 {showAssistant ? 'Hide AI assistant' : 'Ask the AI assistant'}
-      </button>
+      <div className="result-actions">
+        <button type="button" className="assist-cta" onClick={() => setShowAssistant((v) => !v)}>
+          🤖 {showAssistant ? 'Hide AI assistant' : 'Ask the AI assistant'}
+        </button>
+        {curl && <CurlButton curl={curl} />}
+      </div>
     </div>
+  )
+}
+
+// "Have a guess? Check it" — tests a single plaintext against the hash instantly,
+// no wordlist search. Shared by every crack tab; PBKDF2 passes salt/iterations.
+export function VerifyBox({
+  hash,
+  algorithm,
+  salt,
+  iterations,
+  prf,
+}: {
+  hash: string
+  algorithm: string
+  salt?: string | null
+  iterations?: number | null
+  prf?: string
+}) {
+  const [candidate, setCandidate] = useState('')
+
+  const mutation = useMutation({
+    mutationFn: () => verifyHash(hash, candidate, { algorithm, salt, iterations, prf }),
+    onSuccess: (res) => {
+      if (res.match) {
+        recordHistory({ kind: 'verify', algorithm, input: hash, output: candidate })
+      }
+    },
+  })
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (candidate && !mutation.isPending) mutation.mutate()
+  }
+
+  const res = mutation.data
+
+  return (
+    <form className="verify" onSubmit={onSubmit}>
+      <label htmlFor="verify-input">Have a guess? Check it directly</label>
+      <div className="verify-row">
+        <div className="input-wrap">
+          <input
+            id="verify-input"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="Type a password to test against this hash…"
+            value={candidate}
+            onChange={(e) => {
+              setCandidate(e.target.value)
+              if (mutation.data || mutation.isError) mutation.reset()
+            }}
+          />
+        </div>
+        <button type="submit" className="copy-btn" disabled={!candidate || mutation.isPending}>
+          {mutation.isPending ? 'Checking…' : 'Check'}
+        </button>
+      </div>
+      <div className="field-foot">
+        {mutation.isError ? (
+          <span className="msg warn">{mutation.error.message}</span>
+        ) : res?.match ? (
+          <span className="msg ok">✓ Match — that's the password.</span>
+        ) : res && !res.match ? (
+          <span className="msg warn">✗ Not a match.</span>
+        ) : (
+          <span className="msg muted">Instant — checks one guess, no wordlist search.</span>
+        )}
+      </div>
+    </form>
   )
 }

@@ -1,5 +1,12 @@
 // Talks to the Ruki-Pass FastAPI backend.
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
+export const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
+
+// A copy-pasteable curl for any POST endpoint — lets a user reproduce the exact
+// API call from a terminal. Single-quoted body; JSON has no single quotes so
+// this stays valid for our payloads.
+export function toCurl(path: string, body: unknown): string {
+  return `curl -X POST ${API_BASE}${path} \\\n  -H 'Content-Type: application/json' \\\n  -d '${JSON.stringify(body)}'`
+}
 
 // ---- AI assistant (Gemini / Gemma) ----
 export type AssistStatus = { available: boolean; model: string }
@@ -80,10 +87,56 @@ export type CrackResponse = {
 
 export type HashResponse = { algorithm: string; hash: string; saved: boolean }
 
+export type VerifyResponse = { match: boolean; algorithm: string | null }
+
+// Check a single plaintext guess against a hash — instant, no wordlist search.
+export async function verifyHash(
+  hash: string,
+  candidate: string,
+  opts: {
+    algorithm?: string
+    salt?: string | null
+    iterations?: number | null
+    prf?: string
+  } = {},
+): Promise<VerifyResponse> {
+  const res = await fetch(`${API_BASE}/api/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      hash: hash.trim(),
+      candidate,
+      algorithm: opts.algorithm,
+      salt: opts.salt ?? null,
+      iterations: opts.iterations ?? null,
+      prf: opts.prf ?? 'sha256',
+    }),
+  })
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`
+    try {
+      const body = await res.json()
+      if (body?.detail) detail = body.detail
+    } catch {
+      /* keep generic message */
+    }
+    throw new Error(detail)
+  }
+  return res.json()
+}
+
 // Algorithms the generator can produce (mirrors backend HASHABLE_ALGORITHMS).
 export const HASHABLE = [
   'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'bcrypt', 'pbkdf2',
 ] as const
+
+function hashBody(text: string, algorithm: string, save: boolean) {
+  return { text, algorithm, save }
+}
+
+export function curlForHash(text: string, algorithm: string, save: boolean): string {
+  return toCurl('/api/hash', hashBody(text, algorithm, save))
+}
 
 export async function hashText(
   text: string,
@@ -93,7 +146,7 @@ export async function hashText(
   const res = await fetch(`${API_BASE}/api/hash`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, algorithm, save }),
+    body: JSON.stringify(hashBody(text, algorithm, save)),
   })
   if (!res.ok) {
     let detail = `Request failed (${res.status})`
@@ -132,10 +185,7 @@ export type CrackOptions = {
   prf?: string
 }
 
-export async function crackHash(
-  hash: string,
-  options: CrackOptions = {},
-): Promise<CrackResponse> {
+function crackBody(hash: string, options: CrackOptions = {}) {
   const {
     algorithm,
     useRules = true,
@@ -150,24 +200,35 @@ export async function crackHash(
     iterations = null,
     prf = 'sha256',
   } = options
+  return {
+    hash: hash.trim(),
+    algorithm,
+    use_rules: useRules,
+    extra_words: extraWords,
+    brute_force: bruteForce,
+    brute_max_digits: bruteMaxDigits,
+    length: length ?? null,
+    special,
+    brute_around: bruteAround,
+    special_chars: specialChars,
+    salt: salt ?? null,
+    iterations: iterations ?? null,
+    prf,
+  }
+}
+
+export function curlForCrack(hash: string, options: CrackOptions = {}): string {
+  return toCurl('/api/crack', crackBody(hash, options))
+}
+
+export async function crackHash(
+  hash: string,
+  options: CrackOptions = {},
+): Promise<CrackResponse> {
   const res = await fetch(`${API_BASE}/api/crack`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      hash: hash.trim(),
-      algorithm,
-      use_rules: useRules,
-      extra_words: extraWords,
-      brute_force: bruteForce,
-      brute_max_digits: bruteMaxDigits,
-      length: length ?? null,
-      special,
-      brute_around: bruteAround,
-      special_chars: specialChars,
-      salt: salt ?? null,
-      iterations: iterations ?? null,
-      prf,
-    }),
+    body: JSON.stringify(crackBody(hash, options)),
   })
 
   if (!res.ok) {

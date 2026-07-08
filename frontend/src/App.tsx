@@ -4,6 +4,7 @@ import CrackerTab from './CrackerTab'
 import Pbkdf2Tab from './Pbkdf2Tab'
 import BcryptTab from './BcryptTab'
 import Hasher from './Hasher'
+import HistoryPanel from './HistoryPanel'
 
 const ORG_URL = 'https://github.com/Ruki111'
 const REPO_URL = 'https://github.com/Ruki111/Ruki-Pass'
@@ -187,6 +188,14 @@ function HashPassView() {
   const [activeTab, setActiveTab] = useState<string>(TABS[0].algorithm)
   const tab = TABS.find((t) => t.algorithm === activeTab) ?? TABS[0]
 
+  // Auto-detect: a pasted plain-hash length uniquely identifies its algorithm,
+  // so switch to the matching tab. (The plain CrackerTab keeps a stable key so
+  // the pasted hash survives the switch.)
+  function detect(length: number) {
+    const match = TABS.find((t) => t.hexLength === length && t.algorithm !== activeTab)
+    if (match) setActiveTab(match.algorithm)
+  }
+
   return (
     <section className="panel">
       <h2 className="panel-title">Hash Pass</h2>
@@ -213,8 +222,10 @@ function HashPassView() {
       ) : tab.algorithm === 'bcrypt' ? (
         <BcryptTab key="bcrypt" />
       ) : (
-        <CrackerTab key={tab.algorithm} algorithm={tab.algorithm} hexLength={tab.hexLength} />
+        <CrackerTab key="plain" algorithm={tab.algorithm} hexLength={tab.hexLength} onDetect={detect} />
       )}
+
+      <HistoryPanel />
     </section>
   )
 }

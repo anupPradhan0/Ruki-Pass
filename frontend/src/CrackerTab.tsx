@@ -1,14 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { crackHash } from './api'
+import { crackHash, curlForCrack } from './api'
 import AssistantPanel from './AssistantPanel'
-import { Icon, ResultPanel, AdvancedOptions, useAdvancedOptions, useCopy } from './CrackShared'
+import { Icon, ResultPanel, AdvancedOptions, VerifyBox, useAdvancedOptions, useCopy } from './CrackShared'
 
 type Props = {
   /** Algorithm to crack, e.g. "md5". */
   algorithm: string
   /** Expected hex length for this algorithm (md5 = 32), used for a hint. */
   hexLength: number
+  /** Called with a pasted hash's length when it doesn't match this tab — lets
+   *  the parent auto-switch to the algorithm whose length does match. */
+  onDetect?: (length: number) => void
 }
 
 // Per-algorithm example hashes that crack instantly with defaults — a
@@ -22,7 +25,7 @@ const EXAMPLE_HASHES: Record<string, string> = {
   sha512: 'b109f3bbbc244eb82441917ed06d618b9008dd09b3befd1b5e07394c706a8bb980b1d7785e5976ec049b46df5f1326af5a2ea6d103fd07c95385ffab0cacbc86', // sha512("password")
 }
 
-function CrackerTab({ algorithm, hexLength }: Props) {
+function CrackerTab({ algorithm, hexLength, onDetect }: Props) {
   const [hash, setHash] = useState('')
   const [showAssistant, setShowAssistant] = useState(false)
   const opts = useAdvancedOptions()
@@ -37,6 +40,21 @@ function CrackerTab({ algorithm, hexLength }: Props) {
   const validLength = trimmed.length === hexLength
   const isValid = trimmed.length > 0 && isHex && validLength
   const canSubmit = isValid && !mutation.isPending
+
+  // Auto-detect: a complete hex hash whose length doesn't match this tab tells
+  // the parent to switch to the algorithm that produces that length.
+  useEffect(() => {
+    if (isHex && trimmed.length > 0 && trimmed.length !== hexLength) {
+      onDetect?.(trimmed.length)
+    }
+  }, [trimmed, isHex, hexLength, onDetect])
+
+  // This component stays mounted across md5/sha1/… (stable key), so clear any
+  // stale result when the algorithm switches.
+  useEffect(() => {
+    mutation.reset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [algorithm])
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -117,6 +135,7 @@ function CrackerTab({ algorithm, hexLength }: Props) {
         copied={copied}
         showAssistant={showAssistant}
         setShowAssistant={setShowAssistant}
+        curl={isValid ? curlForCrack(trimmed, { algorithm, ...opts.crackParams }) : undefined}
         loadingMessage={
           <>Trying candidates against the wordlist…{opts.bruteForce && ' brute-force can take a few seconds.'}</>
         }
@@ -127,6 +146,8 @@ function CrackerTab({ algorithm, hexLength }: Props) {
           </>
         }
       />
+
+      {isValid && <VerifyBox hash={trimmed} algorithm={algorithm} />}
 
       {isValid && showAssistant && (
         <AssistantPanel key={trimmed} hash={trimmed} algorithm={algorithm} hints={opts.hints} />

@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { hashText, HASHABLE } from './api'
+import { hashText, curlForHash, HASHABLE } from './api'
+import { recordHistory } from './history'
+import HistoryPanel from './HistoryPanel'
 
 // 'sha256' -> 'SHA-256'; everything else (md5, bcrypt, pbkdf2) is just
 // uppercased by the .tab CSS itself.
@@ -10,7 +12,7 @@ function algoLabel(algo: string): string {
 
 function Hasher() {
   const [text, setText] = useState('')
-  const [algorithm, setAlgorithm] = useState('sha256')
+  const [algorithm, setAlgorithm] = useState('md5')
   const [save, setSave] = useState(true)
   const [copied, setCopied] = useState(false)
 
@@ -36,6 +38,14 @@ function Hasher() {
   }
 
   const result = mutation.data
+
+  // Record each generated hash into session history (once per new result).
+  useEffect(() => {
+    if (result) {
+      recordHistory({ kind: 'hash', algorithm: result.algorithm, input: text, output: result.hash })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result])
 
   return (
     <section className="panel">
@@ -79,6 +89,9 @@ function Hasher() {
               </button>
             )}
           </div>
+          <div className="field-foot">
+            <span className="msg muted">Will be hashed with {algoLabel(algorithm).toUpperCase()}.</span>
+          </div>
         </div>
 
         <label className="switch-row">
@@ -113,10 +126,32 @@ function Hasher() {
           </div>
           <p className="result-meta">
             {result.saved ? 'Saved to the learning wordlist.' : 'Not saved.'}
+            {' · '}
+            <CurlLink curl={curlForHash(text, algorithm, save)} />
           </p>
         </div>
       )}
+
+      <HistoryPanel />
     </section>
+  )
+}
+
+function CurlLink({ curl }: { curl: string }) {
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(curl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
+  }
+  return (
+    <button type="button" className="link-btn curl-btn" onClick={copy}>
+      {copied ? 'Copied' : 'Copy as curl'}
+    </button>
   )
 }
 

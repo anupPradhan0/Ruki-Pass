@@ -314,6 +314,56 @@ def algorithms() -> dict[str, list[str]]:
     return {"algorithms": hashing.supported_algorithms()}
 
 
+class VerifyRequest(BaseModel):
+    hash: str = Field(..., description="The hash to check against.")
+    candidate: str = Field(..., description="The plaintext guess to test.")
+    algorithm: str | None = Field(None, description="Hash algorithm; auto-detected if omitted.")
+    salt: str | None = None
+    iterations: int | None = None
+    prf: str = "sha256"
+
+
+class VerifyResponse(BaseModel):
+    match: bool
+    algorithm: str | None = None
+
+
+@app.post("/api/verify", response_model=VerifyResponse)
+def verify(req: VerifyRequest) -> VerifyResponse:
+    """Check one plaintext guess against a hash — instant, no wordlist search.
+
+    The fast counterpart to /api/crack: useful for bcrypt/PBKDF2 where a full
+    crack is slow but testing a single candidate is cheap. A correct guess is
+    fed into the learned wordlist so future cracks get it for free.
+    """
+    algo = req.algorithm
+    try:
+        if algo == "bcrypt" or (algo is None and hashing.is_bcrypt_hash(req.hash)):
+            algo = "bcrypt"
+            match = hashing.bcrypt_matches(
+                hashing.validate_bcrypt_hash(req.hash), req.candidate
+            )
+        elif algo == "pbkdf2" or (algo is None and hashing.parse_pbkdf2_encoded(req.hash)):
+            algo = "pbkdf2"
+            target = hashing.build_pbkdf2_target(req.hash, req.salt, req.iterations, req.prf)
+            match = hashing.pbkdf2_matches(target, req.candidate)
+        else:
+            if algo is None:
+                detected = hashing.detect_algorithms(req.hash)
+                if not detected:
+                    raise ValueError("Could not detect the algorithm — please specify it.")
+                algo = detected[0]
+            if algo not in hashing.ALGORITHMS:
+                raise ValueError(f"unsupported algorithm: {algo!r}")
+            match = hashing.compute(algo, req.candidate) == req.hash.strip().lower()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if match:
+        cracker.learn_password(req.candidate)
+    return VerifyResponse(match=match, algorithm=algo)
+
+
 class HashRequest(BaseModel):
     text: str = Field(..., description="The plaintext to hash.")
     algorithm: str = Field(..., description="Which algorithm to hash with.")

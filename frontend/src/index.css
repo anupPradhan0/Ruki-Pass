@@ -1038,3 +1038,132 @@ code {
   color: var(--ink);
   text-decoration: underline;
 }
+
+/* ---------- Copy-as-curl ---------- */
+.curl-btn {
+  font-size: 0.78rem;
+}
+
+/* On the inverted "found" result, links must flip to paper too. */
+.result.found .curl-btn {
+  color: var(--paper);
+}
+
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* ---------- Verify box ("check a guess") ---------- */
+.verify {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: var(--bd);
+}
+
+.verify label {
+  font-size: 0.85rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.verify-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.verify-row .input-wrap {
+  flex: 1;
+}
+
+/* ---------- Session history ---------- */
+.history {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: var(--bd);
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.history-title {
+  font-size: 0.85rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border: var(--bd);
+  font-size: 0.82rem;
+}
+
+.history-kind {
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  border: 2px solid var(--ink);
+  padding: 0.1rem 0.35rem;
+  flex-shrink: 0;
+}
+
+.history-kind.crack {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.history-algo {
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.history-io {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+.history-time {
+  color: var(--muted);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.history-copy {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 520px) {
+  .history-time {
+    display: none;
+  }
+}
