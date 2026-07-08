@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { crackHash, curlForCrack } from './api'
+import { crackHashStream, curlForCrack, type Progress } from './api'
 import AssistantPanel from './AssistantPanel'
 import Dropdown from './Dropdown'
 import { Icon, ResultPanel, AdvancedOptions, VerifyBox, useAdvancedOptions, useCopy } from './CrackShared'
@@ -26,6 +26,7 @@ function Pbkdf2Tab() {
   const [iterations, setIterations] = useState('')
   const [prf, setPrf] = useState('sha256')
   const [showAssistant, setShowAssistant] = useState(false)
+  const [progress, setProgress] = useState<Progress | null>(null)
   const opts = useAdvancedOptions()
   const { copied, copy } = useCopy()
 
@@ -44,7 +45,9 @@ function Pbkdf2Tab() {
   }
 
   const mutation = useMutation({
-    mutationFn: () => crackHash(trimmed, { algorithm: 'pbkdf2', ...kdf, ...opts.crackParams }),
+    mutationFn: () =>
+      crackHashStream(trimmed, { algorithm: 'pbkdf2', ...kdf, ...opts.crackParams }, setProgress),
+    onMutate: () => setProgress(null),
   })
 
   const canSubmit = isValid && !mutation.isPending
@@ -163,6 +166,7 @@ function Pbkdf2Tab() {
         mutation={mutation}
         copy={copy}
         copied={copied}
+        progress={progress}
         showAssistant={showAssistant}
         setShowAssistant={setShowAssistant}
         curl={isValid ? curlForCrack(trimmed, { algorithm: 'pbkdf2', ...kdf, ...opts.crackParams }) : undefined}

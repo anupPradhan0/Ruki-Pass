@@ -98,6 +98,7 @@ export async function verifyHash(
     salt?: string | null
     iterations?: number | null
     prf?: string
+    hashMode?: HashMode
   } = {},
 ): Promise<VerifyResponse> {
   const res = await fetch(`${API_BASE}/api/verify`, {
@@ -110,6 +111,7 @@ export async function verifyHash(
       salt: opts.salt ?? null,
       iterations: opts.iterations ?? null,
       prf: opts.prf ?? 'sha256',
+      hash_mode: opts.hashMode ?? 'plain',
     }),
   })
   if (!res.ok) {
@@ -130,23 +132,37 @@ export const HASHABLE = [
   'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'bcrypt', 'pbkdf2',
 ] as const
 
-function hashBody(text: string, algorithm: string, save: boolean) {
-  return { text, algorithm, save }
+type HashOpts = { salt?: string | null; hashMode?: HashMode }
+
+function hashBody(text: string, algorithm: string, save: boolean, opts: HashOpts = {}) {
+  return {
+    text,
+    algorithm,
+    save,
+    salt: opts.salt ?? null,
+    hash_mode: opts.hashMode ?? 'plain',
+  }
 }
 
-export function curlForHash(text: string, algorithm: string, save: boolean): string {
-  return toCurl('/api/hash', hashBody(text, algorithm, save))
+export function curlForHash(
+  text: string,
+  algorithm: string,
+  save: boolean,
+  opts: HashOpts = {},
+): string {
+  return toCurl('/api/hash', hashBody(text, algorithm, save, opts))
 }
 
 export async function hashText(
   text: string,
   algorithm: string,
   save: boolean,
+  opts: HashOpts = {},
 ): Promise<HashResponse> {
   const res = await fetch(`${API_BASE}/api/hash`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(hashBody(text, algorithm, save)),
+    body: JSON.stringify(hashBody(text, algorithm, save, opts)),
   })
   if (!res.ok) {
     let detail = `Request failed (${res.status})`
@@ -179,11 +195,26 @@ export type CrackOptions = {
   special?: Special
   bruteAround?: boolean
   specialChars?: string[]
-  // PBKDF2 only — ignored for plain hashes.
+  // An uploaded wordlist, tried early.
+  customWords?: string[]
+  // Salt/HMAC scheme for plain hashes.
+  hashMode?: HashMode
+  // PBKDF2 salt (or the salt/key for a salted plain hash).
   salt?: string | null
   iterations?: number | null
   prf?: string
 }
+
+export type HashMode = 'plain' | 'prefix' | 'suffix' | 'hmac'
+
+export const HASH_MODE_OPTIONS = [
+  { value: 'plain', label: 'None — H(password)' },
+  { value: 'prefix', label: 'Salt + password' },
+  { value: 'suffix', label: 'Password + salt' },
+  { value: 'hmac', label: 'HMAC(salt, password)' },
+] as const
+
+export type Progress = { attempts: number; rate: number }
 
 function crackBody(hash: string, options: CrackOptions = {}) {
   const {
@@ -196,6 +227,8 @@ function crackBody(hash: string, options: CrackOptions = {}) {
     special = 'unknown',
     bruteAround = false,
     specialChars = [],
+    customWords = [],
+    hashMode = 'plain',
     salt = null,
     iterations = null,
     prf = 'sha256',
@@ -211,6 +244,8 @@ function crackBody(hash: string, options: CrackOptions = {}) {
     special,
     brute_around: bruteAround,
     special_chars: specialChars,
+    custom_words: customWords,
+    hash_mode: hashMode,
     salt: salt ?? null,
     iterations: iterations ?? null,
     prf,
@@ -219,6 +254,69 @@ function crackBody(hash: string, options: CrackOptions = {}) {
 
 export function curlForCrack(hash: string, options: CrackOptions = {}): string {
   return toCurl('/api/crack', crackBody(hash, options))
+}
+
+// Streaming crack: reads Server-Sent Events, calls onProgress as candidates are
+// checked, and resolves with the final result. Falls back cleanly if the body
+// isn't streamable.
+export async function crackHashStream(
+  hash: string,
+  options: CrackOptions,
+  onProgress?: (p: Progress) => void,
+): Promise<CrackResponse> {
+  const res = await fetch(`${API_BASE}/api/crack/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(crackBody(hash, options)),
+  })
+  if (!res.ok || !res.body) {
+    let detail = `Request failed (${res.status})`
+    try {
+      const body = await res.json()
+      if (body?.detail) detail = body.detail
+    } catch {
+      /* keep generic message */
+    }
+    throw new Error(detail)
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  let final: CrackResponse | null = null
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    // SSE events are separated by a blank line.
+    const parts = buf.split('\n\n')
+    buf = parts.pop() ?? ''
+    for (const part of parts) {
+      const line = part.trim()
+      if (!line.startsWith('data:')) continue
+      const ev = JSON.parse(line.slice(5).trim())
+      if (ev.type === 'progress') {
+        onProgress?.({ attempts: ev.attempts, rate: ev.rate })
+      } else if (ev.type === 'error') {
+        throw new Error(ev.detail)
+      } else if (ev.type === 'result') {
+        final = {
+          found: ev.found,
+          hash: hash.trim(), // the pasted hash, for history/curl (not the backend tag)
+          algorithm: ev.algorithm,
+          password: ev.password ?? null,
+          attempts: ev.attempts,
+          duration_ms: ev.duration_ms,
+          wordlist_exhausted: ev.wordlist_exhausted,
+          wordlist: ev.wordlist,
+        }
+      }
+    }
+  }
+
+  if (!final) throw new Error('The crack stream ended without a result.')
+  return final
 }
 
 export async function crackHash(

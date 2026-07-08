@@ -6,6 +6,7 @@ algorithm; the registry in ``hashing.py`` makes adding more a one-line change.
 
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 from pathlib import Path
@@ -13,6 +14,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 # Load backend/.env (GEMINI_API_KEY, GEMINI_MODEL) before anything reads
@@ -81,6 +83,14 @@ class CrackRequest(BaseModel):
     special_chars: list[str] = Field(
         default_factory=list,
         description="Exact symbols to try (e.g. ['@']) — enables symbol-in-the-middle like 'ruki123@123'.",
+    )
+    custom_words: list[str] = Field(
+        default_factory=list,
+        description="An uploaded wordlist — tried early, verbatim (and mutated when rules are on).",
+    )
+    hash_mode: Literal["plain", "prefix", "suffix", "hmac"] = Field(
+        "plain",
+        description="Salt/HMAC scheme for plain hashes: H(pw), H(salt+pw), H(pw+salt), HMAC(salt,pw).",
     )
     # PBKDF2-only fields (ignored for plain hashes). Omit salt/iterations when
     # `hash` is a full 'pbkdf2_sha256$iterations$salt$hash' encoded string.
@@ -154,12 +164,14 @@ def _dispatch_crack(
     salt: str | None = None,
     iterations: int | None = None,
     prf: str = "sha256",
+    hash_mode: str = "plain",
     max_candidates: int | None = None,
     **opts,
 ) -> cracker.CrackResult:
     """Route a crack request to the right engine by algorithm. bcrypt and PBKDF2
     keep their own low candidate ceilings — the max_candidates override applies
-    only to plain hashes. Raises ValueError on an unusable hash/target."""
+    only to plain hashes. For plain hashes, salt/hash_mode select a salted or
+    HMAC scheme. Raises ValueError on an unusable hash/target."""
     if algorithm == "bcrypt":
         return cracker.crack_bcrypt(hashing.validate_bcrypt_hash(hash), **opts)
     if algorithm == "pbkdf2":
@@ -167,7 +179,28 @@ def _dispatch_crack(
         return cracker.crack_pbkdf2(target, **opts)
     if max_candidates is not None:
         opts["max_candidates"] = max_candidates
-    return cracker.crack(hash, algorithm=algorithm, **opts)
+    return cracker.crack(hash, algorithm=algorithm, salt=salt, hash_mode=hash_mode, **opts)
+
+
+def _dispatch_crack_events(
+    hash: str,
+    algorithm: str | None,
+    *,
+    salt: str | None = None,
+    iterations: int | None = None,
+    prf: str = "sha256",
+    hash_mode: str = "plain",
+    **opts,
+):
+    """Streaming counterpart of ``_dispatch_crack`` — returns a generator of
+    progress/result event dicts. Eager validation (bcrypt/PBKDF2) raises here;
+    plain-hash validation raises when the generator is first advanced."""
+    if algorithm == "bcrypt":
+        return cracker.crack_bcrypt_events(hashing.validate_bcrypt_hash(hash), **opts)
+    if algorithm == "pbkdf2":
+        target = hashing.build_pbkdf2_target(hash, salt, iterations, prf)
+        return cracker.crack_pbkdf2_events(target, **opts)
+    return cracker.crack_events(hash, algorithm=algorithm, salt=salt, hash_mode=hash_mode, **opts)
 
 
 class AssistResponse(BaseModel):
@@ -321,6 +354,7 @@ class VerifyRequest(BaseModel):
     salt: str | None = None
     iterations: int | None = None
     prf: str = "sha256"
+    hash_mode: Literal["plain", "prefix", "suffix", "hmac"] = "plain"
 
 
 class VerifyResponse(BaseModel):
@@ -353,9 +387,9 @@ def verify(req: VerifyRequest) -> VerifyResponse:
                 if not detected:
                     raise ValueError("Could not detect the algorithm — please specify it.")
                 algo = detected[0]
-            if algo not in hashing.ALGORITHMS:
-                raise ValueError(f"unsupported algorithm: {algo!r}")
-            match = hashing.compute(algo, req.candidate) == req.hash.strip().lower()
+            match = hashing.compute_variant(
+                algo, req.candidate, req.salt, req.hash_mode
+            ) == req.hash.strip().lower()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -370,6 +404,11 @@ class HashRequest(BaseModel):
     save: bool = Field(
         True,
         description="Add the plaintext to the learned wordlist to improve cracking.",
+    )
+    salt: str | None = Field(None, description="Salt/key for a salted or HMAC scheme (plain hashes only).")
+    hash_mode: Literal["plain", "prefix", "suffix", "hmac"] = Field(
+        "plain",
+        description="Salt/HMAC scheme for plain hashes; ignored for bcrypt/PBKDF2.",
     )
 
 
@@ -395,7 +434,10 @@ def make_hash(req: HashRequest) -> HashResponse:
     if not req.text:
         raise HTTPException(status_code=422, detail="text must not be empty")
     try:
-        digest = hashing.generate_hash(req.algorithm, req.text)
+        if req.algorithm in hashing.ALGORITHMS and req.hash_mode != "plain":
+            digest = hashing.compute_variant(req.algorithm, req.text, req.salt, req.hash_mode)
+        else:
+            digest = hashing.generate_hash(req.algorithm, req.text)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     saved = cracker.learn_password(req.text) if req.save else False
@@ -417,6 +459,7 @@ def crack(req: CrackRequest) -> CrackResponse:
             salt=req.salt,
             iterations=req.iterations,
             prf=req.prf,
+            hash_mode=req.hash_mode,
             use_rules=req.use_rules,
             extra_words=req.extra_words,
             brute_force=req.brute_force,
@@ -425,6 +468,7 @@ def crack(req: CrackRequest) -> CrackResponse:
             special=req.special,
             brute_around=req.brute_around,
             special_chars=req.special_chars,
+            custom_words=req.custom_words,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -439,4 +483,41 @@ def crack(req: CrackRequest) -> CrackResponse:
         wordlist_exhausted=result.wordlist_exhausted,
         wordlist=result.wordlist,
         capped=result.capped,
+    )
+
+
+@app.post("/api/crack/stream")
+def crack_stream(req: CrackRequest) -> StreamingResponse:
+    """Same as /api/crack, but streams Server-Sent Events so the UI can show a
+    live progress counter. Emits ``{"type":"progress",...}`` periodically and a
+    final ``{"type":"result",...}`` (or ``{"type":"error",...}``)."""
+
+    def gen():
+        try:
+            events = _dispatch_crack_events(
+                req.hash,
+                req.algorithm,
+                salt=req.salt,
+                iterations=req.iterations,
+                prf=req.prf,
+                hash_mode=req.hash_mode,
+                use_rules=req.use_rules,
+                extra_words=req.extra_words,
+                brute_force=req.brute_force,
+                brute_max_digits=req.brute_max_digits,
+                length=req.length,
+                special=req.special,
+                brute_around=req.brute_around,
+                special_chars=req.special_chars,
+                custom_words=req.custom_words,
+            )
+            for ev in events:
+                yield f"data: {json.dumps(ev)}\n\n"
+        except ValueError as exc:
+            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

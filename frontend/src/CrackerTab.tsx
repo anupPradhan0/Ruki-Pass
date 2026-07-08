@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { crackHash, curlForCrack } from './api'
+import { crackHashStream, curlForCrack, type HashMode, type Progress, HASH_MODE_OPTIONS } from './api'
 import AssistantPanel from './AssistantPanel'
+import Dropdown from './Dropdown'
 import { Icon, ResultPanel, AdvancedOptions, VerifyBox, useAdvancedOptions, useCopy } from './CrackShared'
 
 type Props = {
@@ -28,11 +29,19 @@ const EXAMPLE_HASHES: Record<string, string> = {
 function CrackerTab({ algorithm, hexLength, onDetect }: Props) {
   const [hash, setHash] = useState('')
   const [showAssistant, setShowAssistant] = useState(false)
+  const [hashMode, setHashMode] = useState<HashMode>('plain')
+  const [salt, setSalt] = useState('')
+  const [progress, setProgress] = useState<Progress | null>(null)
   const opts = useAdvancedOptions()
   const { copied, copy } = useCopy()
 
+  // Salt/HMAC params, folded into every crack/curl/verify call for this tab.
+  const saltParams = { hashMode, salt: hashMode === 'plain' ? null : salt }
+
   const mutation = useMutation({
-    mutationFn: () => crackHash(hash, { algorithm, ...opts.crackParams }),
+    mutationFn: () =>
+      crackHashStream(hash, { algorithm, ...saltParams, ...opts.crackParams }, setProgress),
+    onMutate: () => setProgress(null),
   })
 
   const trimmed = hash.trim()
@@ -114,6 +123,36 @@ function CrackerTab({ algorithm, hexLength, onDetect }: Props) {
           </div>
         </div>
 
+        {/* ---- Salt / HMAC ---- */}
+        <div className="brute-options">
+          <div className="brute-row">
+            <div className="brute-field">
+              <span>Salted / HMAC?</span>
+              <Dropdown value={hashMode} onChange={(v) => setHashMode(v as HashMode)}
+                options={HASH_MODE_OPTIONS} />
+            </div>
+            {hashMode !== 'plain' && (
+              <label className="brute-field">
+                <span>{hashMode === 'hmac' ? 'Key / secret' : 'Salt'}</span>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="e.g. s4lt"
+                  value={salt}
+                  onChange={(e) => setSalt(e.target.value)}
+                />
+              </label>
+            )}
+          </div>
+          {hashMode !== 'plain' && (
+            <span className="msg muted" style={{ fontSize: '0.78rem' }}>
+              Cracks <code>{hashMode === 'hmac' ? 'HMAC(key, password)' : hashMode === 'prefix' ? 'H(salt + password)' : 'H(password + salt)'}</code>{' '}
+              — the salt/key is known, only the password is unknown.
+            </span>
+          )}
+        </div>
+
         <AdvancedOptions
           opts={opts}
           idPrefix="hash"
@@ -133,9 +172,10 @@ function CrackerTab({ algorithm, hexLength, onDetect }: Props) {
         mutation={mutation}
         copy={copy}
         copied={copied}
+        progress={progress}
         showAssistant={showAssistant}
         setShowAssistant={setShowAssistant}
-        curl={isValid ? curlForCrack(trimmed, { algorithm, ...opts.crackParams }) : undefined}
+        curl={isValid ? curlForCrack(trimmed, { algorithm, ...saltParams, ...opts.crackParams }) : undefined}
         loadingMessage={
           <>Trying candidates against the wordlist…{opts.bruteForce && ' brute-force can take a few seconds.'}</>
         }
@@ -147,7 +187,7 @@ function CrackerTab({ algorithm, hexLength, onDetect }: Props) {
         }
       />
 
-      {isValid && <VerifyBox hash={trimmed} algorithm={algorithm} />}
+      {isValid && <VerifyBox hash={trimmed} algorithm={algorithm} salt={saltParams.salt} hashMode={hashMode} />}
 
       {isValid && showAssistant && (
         <AssistantPanel key={trimmed} hash={trimmed} algorithm={algorithm} hints={opts.hints} />

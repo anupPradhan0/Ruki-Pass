@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import CrackerTab from './CrackerTab'
 import Pbkdf2Tab from './Pbkdf2Tab'
 import BcryptTab from './BcryptTab'
+import BatchTab from './BatchTab'
 import Hasher from './Hasher'
 import HistoryPanel from './HistoryPanel'
 
@@ -21,6 +22,8 @@ const TABS = [
   // components (not the plain hex-hash CrackerTab). hexLength is unused for them.
   { algorithm: 'pbkdf2', label: 'PBKDF2', hexLength: 0 },
   { algorithm: 'bcrypt', label: 'bcrypt', hexLength: 0 },
+  // Batch isn't an algorithm — it cracks a pasted list of plain hashes.
+  { algorithm: 'batch', label: 'Batch', hexLength: 0 },
 ] as const
 
 type View = 'home' | 'hashpass' | 'makehash'
@@ -221,6 +224,8 @@ function HashPassView() {
         <Pbkdf2Tab key="pbkdf2" />
       ) : tab.algorithm === 'bcrypt' ? (
         <BcryptTab key="bcrypt" />
+      ) : tab.algorithm === 'batch' ? (
+        <BatchTab key="batch" />
       ) : (
         <CrackerTab key="plain" algorithm={tab.algorithm} hexLength={tab.hexLength} onDetect={detect} />
       )}

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { hashText, curlForHash, HASHABLE } from './api'
+import { hashText, curlForHash, HASHABLE, HASH_MODE_OPTIONS, type HashMode } from './api'
 import { recordHistory } from './history'
 import HistoryPanel from './HistoryPanel'
+import Dropdown from './Dropdown'
 
 // 'sha256' -> 'SHA-256'; everything else (md5, bcrypt, pbkdf2) is just
 // uppercased by the .tab CSS itself.
@@ -10,14 +11,23 @@ function algoLabel(algo: string): string {
   return algo.startsWith('sha') ? `SHA-${algo.slice(3)}` : algo
 }
 
+// Salt/HMAC only applies to plain hashes; bcrypt/PBKDF2 salt themselves.
+const SALTABLE = (a: string) => a !== 'bcrypt' && a !== 'pbkdf2'
+
 function Hasher() {
   const [text, setText] = useState('')
   const [algorithm, setAlgorithm] = useState('md5')
   const [save, setSave] = useState(true)
+  const [hashMode, setHashMode] = useState<HashMode>('plain')
+  const [salt, setSalt] = useState('')
   const [copied, setCopied] = useState(false)
 
+  const saltable = SALTABLE(algorithm)
+  const mode = saltable ? hashMode : 'plain'
+  const hashOpts = { salt: mode === 'plain' ? null : salt, hashMode: mode }
+
   const mutation = useMutation({
-    mutationFn: () => hashText(text, algorithm, save),
+    mutationFn: () => hashText(text, algorithm, save, hashOpts),
   })
 
   const canSubmit = text.length > 0 && !mutation.isPending
@@ -94,6 +104,31 @@ function Hasher() {
           </div>
         </div>
 
+        {saltable && (
+          <div className="brute-options">
+            <div className="brute-row">
+              <div className="brute-field">
+                <span>Salted / HMAC?</span>
+                <Dropdown value={hashMode} onChange={(v) => setHashMode(v as HashMode)}
+                  options={HASH_MODE_OPTIONS} />
+              </div>
+              {hashMode !== 'plain' && (
+                <label className="brute-field">
+                  <span>{hashMode === 'hmac' ? 'Key / secret' : 'Salt'}</span>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="e.g. s4lt"
+                    value={salt}
+                    onChange={(e) => setSalt(e.target.value)}
+                  />
+                </label>
+              )}
+            </div>
+          </div>
+        )}
+
         <label className="switch-row">
           <span className="switch-text">
             <strong>Save to improve cracking</strong>
@@ -127,7 +162,7 @@ function Hasher() {
           <p className="result-meta">
             {result.saved ? 'Saved to the learning wordlist.' : 'Not saved.'}
             {' · '}
-            <CurlLink curl={curlForHash(text, algorithm, save)} />
+            <CurlLink curl={curlForHash(text, algorithm, save, hashOpts)} />
           </p>
         </div>
       )}

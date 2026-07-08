@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useMutation, type UseMutationResult } from '@tanstack/react-query'
-import { type CrackResponse, type Special, SPECIAL_OPTIONS, verifyHash } from './api'
+import {
+  type CrackResponse,
+  type Special,
+  type Progress,
+  type HashMode,
+  SPECIAL_OPTIONS,
+  verifyHash,
+} from './api'
 import { recordHistory } from './history'
 import Dropdown from './Dropdown'
 
@@ -45,6 +52,10 @@ export function useCopy() {
 // Hint words / rules / brute-force state, shared by every crack tab. Exposes
 // both the raw fields (for controlled inputs) and the derived params ready to
 // spread into crackHash()/AssistantPanel hints.
+// Uploaded wordlists over this many lines are truncated (keeps the JSON POST
+// sane — a targeted company list is far smaller than this).
+const MAX_CUSTOM_WORDS = 100_000
+
 export function useAdvancedOptions() {
   const [useRules, setUseRules] = useState(true)
   const [seedWords, setSeedWords] = useState('')
@@ -53,10 +64,24 @@ export function useAdvancedOptions() {
   const [special, setSpecial] = useState<Special>('unknown')
   const [symbols, setSymbols] = useState('')
   const [bruteAround, setBruteAround] = useState(false)
+  const [customWords, setCustomWords] = useState<string[]>([])
+  const [wordlistName, setWordlistName] = useState('')
 
   const extraWords = seedWords.split(/[\s,]+/).map((w) => w.trim()).filter(Boolean)
   const lengthNum = length.trim() === '' ? null : Number(length)
   const specialChars = [...new Set(symbols.replace(/\s+/g, '').split(''))]
+
+  async function loadWordlistFile(file: File) {
+    const text = await file.text()
+    const words = text.split(/\r?\n/).map((w) => w.trim()).filter(Boolean).slice(0, MAX_CUSTOM_WORDS)
+    setCustomWords(words)
+    setWordlistName(file.name)
+  }
+
+  function clearWordlist() {
+    setCustomWords([])
+    setWordlistName('')
+  }
 
   return {
     useRules, setUseRules,
@@ -66,7 +91,8 @@ export function useAdvancedOptions() {
     special, setSpecial,
     symbols, setSymbols,
     bruteAround, setBruteAround,
-    crackParams: { useRules, extraWords, bruteForce, length: lengthNum, special, bruteAround, specialChars },
+    customWords, wordlistName, loadWordlistFile, clearWordlist,
+    crackParams: { useRules, extraWords, bruteForce, length: lengthNum, special, bruteAround, specialChars, customWords },
     hints: { extraWords, length: lengthNum, special, specialChars },
   }
 }
@@ -116,6 +142,41 @@ export function AdvancedOptions({
             </div>
             <div className="field-foot">
               <span className="msg muted">{hintHelp}</span>
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor={`${idPrefix}-wordlist`}>
+              Custom wordlist <span className="opt">(optional .txt)</span>
+            </label>
+            <div className="wordlist-row">
+              <input
+                id={`${idPrefix}-wordlist`}
+                type="file"
+                accept=".txt,text/plain"
+                className="wordlist-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) opts.loadWordlistFile(file)
+                  e.target.value = '' // allow re-selecting the same file
+                }}
+              />
+              {opts.customWords.length > 0 && (
+                <button type="button" className="link-btn" onClick={opts.clearWordlist}>
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="field-foot">
+              {opts.customWords.length > 0 ? (
+                <span className="msg ok">
+                  {opts.customWords.length.toLocaleString()} words from {opts.wordlistName} — tried first.
+                </span>
+              ) : (
+                <span className="msg muted">
+                  Upload your own list (one password per line) — tried before the built-in wordlist.
+                </span>
+              )}
             </div>
           </div>
 
@@ -197,6 +258,7 @@ export function ResultPanel({
   loadingMessage,
   notFoundTip,
   curl,
+  progress,
 }: {
   mutation: UseMutationResult<CrackResponse, Error, void>
   copy: (text: string) => void
@@ -206,6 +268,7 @@ export function ResultPanel({
   loadingMessage: React.ReactNode
   notFoundTip: React.ReactNode
   curl?: string
+  progress?: Progress | null
 }) {
   const result = mutation.data
   // Record every successful crack into session history (once per new result).
@@ -224,7 +287,15 @@ export function ResultPanel({
     return (
       <div className="result loading">
         <span className="spinner big" />
-        <p>{loadingMessage}</p>
+        <div>
+          <p>{loadingMessage}</p>
+          {progress && (
+            <p className="progress-live">
+              Checked {progress.attempts.toLocaleString()} candidates ·{' '}
+              ~{Math.round(progress.rate).toLocaleString()}/sec
+            </p>
+          )}
+        </div>
       </div>
     )
   }
@@ -285,17 +356,19 @@ export function VerifyBox({
   salt,
   iterations,
   prf,
+  hashMode,
 }: {
   hash: string
   algorithm: string
   salt?: string | null
   iterations?: number | null
   prf?: string
+  hashMode?: HashMode
 }) {
   const [candidate, setCandidate] = useState('')
 
   const mutation = useMutation({
-    mutationFn: () => verifyHash(hash, candidate, { algorithm, salt, iterations, prf }),
+    mutationFn: () => verifyHash(hash, candidate, { algorithm, salt, iterations, prf, hashMode }),
     onSuccess: (res) => {
       if (res.match) {
         recordHistory({ kind: 'verify', algorithm, input: hash, output: candidate })

@@ -1167,3 +1167,127 @@ code {
     display: none;
   }
 }
+
+/* ---------- Live progress counter ---------- */
+.progress-live {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+/* ---------- Custom wordlist upload ---------- */
+.wordlist-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.wordlist-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.wordlist-input::file-selector-button {
+  appearance: none;
+  background: var(--paper);
+  border: var(--bd);
+  color: var(--ink);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.7rem;
+  margin-right: 0.7rem;
+  cursor: pointer;
+}
+
+.wordlist-input::file-selector-button:hover {
+  box-shadow: var(--sh-sm);
+}
+
+/* ---------- Batch mode ---------- */
+.batch-input {
+  width: 100%;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--bd);
+  padding: 0.8rem 0.95rem;
+  outline: none;
+  resize: vertical;
+}
+
+.batch-input:focus {
+  box-shadow: var(--sh);
+}
+
+.batch-table-wrap {
+  margin-top: 0.75rem;
+  overflow-x: auto;
+  border: var(--bd);
+}
+
+.batch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.batch-table th,
+.batch-table td {
+  text-align: left;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 2px solid var(--ink);
+  white-space: nowrap;
+}
+
+.batch-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.batch-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.batch-table code {
+  background: none;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+.batch-pw {
+  font-weight: 800;
+}
+
+.batch-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.batch-status.found {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0.1rem 0.4rem;
+}
+
+.batch-status.error {
+  text-decoration: underline;
+  text-decoration-style: wavy;
+}
+
+.batch-row.notfound td,
+.batch-row.error td {
+  opacity: 0.7;
+}

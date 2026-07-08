@@ -46,6 +46,35 @@ def compute(algorithm: str, text: str) -> str:
     return fn(text.encode("utf-8"))
 
 
+# Salted / keyed schemes real systems use instead of a raw H(password):
+#   plain  = H(password)
+#   prefix = H(salt + password)      suffix = H(password + salt)
+#   hmac   = HMAC(salt_or_key, password)
+# The digest LENGTH is unchanged by any of these, so length-based auto-detection
+# still works. The salt is treated as UTF-8 text (ponytail: hex-salt support can
+# come later if a real target needs it).
+HASH_MODES = {"plain", "prefix", "suffix", "hmac"}
+
+
+def compute_variant(
+    algorithm: str, text: str, salt: str | None = None, mode: str = "plain"
+) -> str:
+    """Hash ``text`` under an optional salt/HMAC ``mode``, returning a hex digest."""
+    if mode not in HASH_MODES:
+        raise ValueError(f"unknown hash mode: {mode!r}")
+    if algorithm not in ALGORITHMS:
+        raise ValueError(f"unsupported algorithm: {algorithm!r}")
+    s = (salt or "").encode("utf-8")
+    b = text.encode("utf-8")
+    if mode == "hmac":
+        return hmac.new(s, b, algorithm).hexdigest()
+    if mode == "prefix":
+        return ALGORITHMS[algorithm](s + b)
+    if mode == "suffix":
+        return ALGORITHMS[algorithm](b + s)
+    return ALGORITHMS[algorithm](b)
+
+
 def detect_algorithms(hash_hex: str) -> list[str]:
     """Best-effort guess of which algorithms could have produced this hash,
     based on its hex length. Returns an empty list if nothing matches."""

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
@@ -121,6 +121,7 @@ def build_candidates(
     brute_around: bool = False,
     special_chars: list[str] | None = None,
     direct_candidates: list[str] | None = None,
+    custom_words: list[str] | None = None,
 ) -> Iterator[str]:
     """Build the stream of password candidates to try, cheapest first.
 
@@ -133,6 +134,13 @@ def build_candidates(
     # -1. Concrete guesses from the AI assistant — full passwords tried exactly
     # as written, before anything else (its highest-value output).
     yield from direct_candidates or []
+
+    # -0.5. A user-uploaded wordlist — targeted (e.g. company terms), so try it
+    # early: verbatim, then mutated when rules are on.
+    if custom_words:
+        yield from custom_words
+        if use_rules:
+            yield from mutations.mutate_all(custom_words)
 
     # 0. Passwords learned from the hash generator — confirmed real, cheapest
     # high-value guesses, so try them (and their mutations) before anything else.
@@ -195,6 +203,9 @@ def crack(
     brute_around: bool = False,
     special_chars: list[str] | None = None,
     direct_candidates: list[str] | None = None,
+    custom_words: list[str] | None = None,
+    salt: str | None = None,
+    hash_mode: str = "plain",
     max_candidates: int = DEFAULT_MAX_CANDIDATES,
 ) -> CrackResult:
     """Try to recover the plaintext behind ``hash_hex``.
@@ -203,8 +214,9 @@ def crack(
     ``use_rules`` is on, base words are mutated (capitalization, numbers, leet).
     When ``brute_force`` is on with a known ``length``, the template generator
     places digits and an optional symbol (``special_chars``) in any position —
-    so 'ruki123@123' is reachable. ``max_candidates`` caps the work so a huge
-    space can't run forever. Returns a CrackResult.
+    so 'ruki123@123' is reachable. ``hash_mode``/``salt`` handle salted or HMAC
+    schemes (H(salt+pw), H(pw+salt), HMAC). ``max_candidates`` caps the work so a
+    huge space can't run forever. Returns a CrackResult.
     """
     target = normalize_hash(hash_hex)
 
@@ -235,6 +247,7 @@ def crack(
             brute_around=brute_around,
             special_chars=special_chars,
             direct_candidates=direct_candidates,
+            custom_words=custom_words,
         )
         base_name = default_wordlist().name
         modes = [m for m, on in (("rules", use_rules), ("brute", brute_force)) if on]
@@ -246,7 +259,7 @@ def crack(
     for word in candidates:
         for algo in algorithms:
             attempts += 1
-            if hashing.compute(algo, word) == target:
+            if hashing.compute_variant(algo, word, salt, hash_mode) == target:
                 return CrackResult(
                     found=True,
                     hash=target,
@@ -286,6 +299,7 @@ def crack_pbkdf2(
     brute_around: bool = False,
     special_chars: list[str] | None = None,
     direct_candidates: list[str] | None = None,
+    custom_words: list[str] | None = None,
     max_candidates: int = DEFAULT_PBKDF2_MAX_CANDIDATES,
 ) -> CrackResult:
     """Recover the password behind a PBKDF2 ``target`` (salt + iterations known).
@@ -311,6 +325,7 @@ def crack_pbkdf2(
             brute_around=brute_around,
             special_chars=special_chars,
             direct_candidates=direct_candidates,
+            custom_words=custom_words,
         )
 
     attempts = 0
@@ -358,6 +373,7 @@ def crack_bcrypt(
     brute_around: bool = False,
     special_chars: list[str] | None = None,
     direct_candidates: list[str] | None = None,
+    custom_words: list[str] | None = None,
     max_candidates: int = DEFAULT_BCRYPT_MAX_CANDIDATES,
 ) -> CrackResult:
     """Recover the password behind a bcrypt ``hashed`` string (self-contained:
@@ -383,6 +399,7 @@ def crack_bcrypt(
             brute_around=brute_around,
             special_chars=special_chars,
             direct_candidates=direct_candidates,
+            custom_words=custom_words,
         )
 
     attempts = 0
@@ -414,4 +431,167 @@ def crack_bcrypt(
         wordlist_exhausted=not capped,
         wordlist=label,
         capped=capped,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Streaming variants — same crack, but yield progress events as they go so the
+# UI can show a live "checked N candidates · ~R/sec" counter instead of a blind
+# spinner. Kept separate from the returning functions above (which stay simple
+# and are covered by tests); the shared loop lives in ``_run_events``.
+#
+# Each event is a plain dict: {"type": "progress"|"result"|"error", ...}.
+# ---------------------------------------------------------------------------
+
+# Emit a progress event every this many candidates. Small enough to feel live on
+# slow targets (bcrypt/pbkdf2), large enough not to flood on fast plain hashes.
+PROGRESS_EVERY = 2000
+
+
+def _run_events(
+    candidates: Iterable[str],
+    match: Callable[[str], str | None],
+    *,
+    result_algorithm: str | None,
+    label: str,
+    max_candidates: int,
+) -> Iterator[dict]:
+    """Drive ``candidates`` through ``match`` (returns the matched algorithm name
+    or None), yielding progress events and a final result event."""
+    attempts = 0
+    capped = False
+    start = time.perf_counter()
+    for word in candidates:
+        attempts += 1
+        algo = match(word)
+        if algo is not None:
+            yield {
+                "type": "result",
+                "found": True,
+                "algorithm": algo,
+                "password": word,
+                "attempts": attempts,
+                "duration_ms": (time.perf_counter() - start) * 1000,
+                "wordlist": label,
+                "wordlist_exhausted": False,
+                "capped": False,
+            }
+            return
+        if attempts % PROGRESS_EVERY == 0:
+            elapsed = time.perf_counter() - start
+            yield {
+                "type": "progress",
+                "attempts": attempts,
+                "rate": attempts / elapsed if elapsed > 0 else 0.0,
+            }
+        if attempts >= max_candidates:
+            capped = True
+            break
+    yield {
+        "type": "result",
+        "found": False,
+        "algorithm": result_algorithm,
+        "password": None,
+        "attempts": attempts,
+        "duration_ms": (time.perf_counter() - start) * 1000,
+        "wordlist": label,
+        "wordlist_exhausted": not capped,
+        "capped": capped,
+    }
+
+
+def _candidates(custom_words: list[str] | None = None, **opts) -> Iterator[str]:
+    """build_candidates with the streaming endpoints' keyword bundle."""
+    return build_candidates(
+        opts.get("use_rules", True),
+        opts.get("extra_words"),
+        opts.get("rule_seed_limit", DEFAULT_RULE_SEED_LIMIT),
+        brute_force=opts.get("brute_force", False),
+        brute_max_digits=opts.get("brute_max_digits", 5),
+        length=opts.get("length"),
+        special=opts.get("special", "unknown"),
+        brute_around=opts.get("brute_around", False),
+        special_chars=opts.get("special_chars"),
+        direct_candidates=opts.get("direct_candidates"),
+        custom_words=custom_words,
+    )
+
+
+def crack_events(
+    hash_hex: str,
+    algorithm: str | None = None,
+    *,
+    salt: str | None = None,
+    hash_mode: str = "plain",
+    custom_words: list[str] | None = None,
+    max_candidates: int = DEFAULT_MAX_CANDIDATES,
+    **opts,
+) -> Iterator[dict]:
+    """Streaming plain-hash crack. Same options as ``crack``."""
+    target = normalize_hash(hash_hex)
+    if algorithm is not None:
+        if algorithm not in hashing.ALGORITHMS:
+            raise ValueError(f"unsupported algorithm: {algorithm!r}")
+        algorithms = [algorithm]
+    else:
+        algorithms = hashing.detect_algorithms(target)
+        if not algorithms:
+            raise ValueError(
+                f"could not auto-detect algorithm for a {len(target)}-char hash; "
+                "pass `algorithm` explicitly"
+            )
+
+    def match(word: str) -> str | None:
+        for algo in algorithms:
+            if hashing.compute_variant(algo, word, salt, hash_mode) == target:
+                return algo
+        return None
+
+    base_name = default_wordlist().name
+    modes = [m for m, on in (("rules", opts.get("use_rules", True)),
+                             ("brute", opts.get("brute_force", False))) if on]
+    label = f"{base_name} + {' + '.join(modes)}" if modes else base_name
+    yield from _run_events(
+        _candidates(custom_words, **opts),
+        match,
+        result_algorithm=algorithms[0] if len(algorithms) == 1 else None,
+        label=label,
+        max_candidates=max_candidates,
+    )
+
+
+def crack_pbkdf2_events(
+    target: hashing.Pbkdf2Target,
+    *,
+    custom_words: list[str] | None = None,
+    max_candidates: int = DEFAULT_PBKDF2_MAX_CANDIDATES,
+    **opts,
+) -> Iterator[dict]:
+    """Streaming PBKDF2 crack."""
+    label = f"pbkdf2_{target.prf} ({target.iterations:,} iters)"
+    yield from _run_events(
+        _candidates(custom_words, **opts),
+        lambda word: "pbkdf2" if hashing.pbkdf2_matches(target, word) else None,
+        result_algorithm="pbkdf2",
+        label=label,
+        max_candidates=max_candidates,
+    )
+
+
+def crack_bcrypt_events(
+    hashed: str,
+    *,
+    custom_words: list[str] | None = None,
+    max_candidates: int = DEFAULT_BCRYPT_MAX_CANDIDATES,
+    **opts,
+) -> Iterator[dict]:
+    """Streaming bcrypt crack."""
+    cost = hashing.bcrypt_cost(hashed)
+    label = f"bcrypt (cost {cost})" if cost is not None else "bcrypt"
+    yield from _run_events(
+        _candidates(custom_words, **opts),
+        lambda word: "bcrypt" if hashing.bcrypt_matches(hashed, word) else None,
+        result_algorithm="bcrypt",
+        label=label,
+        max_candidates=max_candidates,
     )

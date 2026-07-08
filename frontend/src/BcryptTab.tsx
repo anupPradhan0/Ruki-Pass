@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { crackHash, curlForCrack } from './api'
+import { crackHashStream, curlForCrack, type Progress } from './api'
 import AssistantPanel from './AssistantPanel'
 import { Icon, ResultPanel, AdvancedOptions, VerifyBox, useAdvancedOptions, useCopy } from './CrackShared'
 
@@ -14,6 +14,7 @@ const BCRYPT_RE = /^\$2[abxy]\$\d{2}\$[./A-Za-z0-9]{53}$/
 function BcryptTab() {
   const [hash, setHash] = useState('')
   const [showAssistant, setShowAssistant] = useState(false)
+  const [progress, setProgress] = useState<Progress | null>(null)
   const opts = useAdvancedOptions()
   const { copied, copy } = useCopy()
 
@@ -22,7 +23,9 @@ function BcryptTab() {
   const cost = isValid ? Number(trimmed.split('$')[2]) : null
 
   const mutation = useMutation({
-    mutationFn: () => crackHash(trimmed, { algorithm: 'bcrypt', ...opts.crackParams }),
+    mutationFn: () =>
+      crackHashStream(trimmed, { algorithm: 'bcrypt', ...opts.crackParams }, setProgress),
+    onMutate: () => setProgress(null),
   })
 
   const canSubmit = isValid && !mutation.isPending
@@ -107,6 +110,7 @@ function BcryptTab() {
         mutation={mutation}
         copy={copy}
         copied={copied}
+        progress={progress}
         showAssistant={showAssistant}
         setShowAssistant={setShowAssistant}
         curl={isValid ? curlForCrack(trimmed, { algorithm: 'bcrypt', ...opts.crackParams }) : undefined}
