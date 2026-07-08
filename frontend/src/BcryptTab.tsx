@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { crackHash } from './api'
+import { crackHash, curlForCrack } from './api'
 import AssistantPanel from './AssistantPanel'
-import { Icon, ResultPanel, AdvancedOptions, useAdvancedOptions, useCopy } from './CrackShared'
+import { Icon, ResultPanel, AdvancedOptions, VerifyBox, useAdvancedOptions, useCopy } from './CrackShared'
 
 // A real bcrypt("password") at cost 4 — low cost means it cracks instantly, a
 // satisfying first try. Verified by a backend test so it can't silently break.
@@ -109,6 +109,7 @@ function BcryptTab() {
         copied={copied}
         showAssistant={showAssistant}
         setShowAssistant={setShowAssistant}
+        curl={isValid ? curlForCrack(trimmed, { algorithm: 'bcrypt', ...opts.crackParams }) : undefined}
         loadingMessage="Hashing each candidate with bcrypt… this is slow by design, so give it a moment."
         notFoundTip={
           <>
@@ -118,6 +119,8 @@ function BcryptTab() {
           </>
         }
       />
+
+      {isValid && <VerifyBox hash={trimmed} algorithm="bcrypt" />}
 
       {isValid && showAssistant && (
         <AssistantPanel key={trimmed} hash={trimmed} algorithm="bcrypt" hints={opts.hints} />

@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { crackHash } from './api'
+import { crackHash, curlForCrack } from './api'
 import AssistantPanel from './AssistantPanel'
 import Dropdown from './Dropdown'
-import { Icon, ResultPanel, AdvancedOptions, useAdvancedOptions, useCopy } from './CrackShared'
+import { Icon, ResultPanel, AdvancedOptions, VerifyBox, useAdvancedOptions, useCopy } from './CrackShared'
 
 // RFC 6070 test vector: PBKDF2-HMAC-SHA1("password", "salt", 1, 20). One
 // iteration + a wordlist word means it cracks instantly — a satisfying first try.
@@ -35,15 +35,16 @@ function Pbkdf2Tab() {
   const fieldsOk = isEncoded || (salt.trim() !== '' && iterations.trim() !== '' && Number(iterations) >= 1)
   const isValid = trimmed.length > 0 && fieldsOk
 
+  // Salt/iterations/prf shared by crack, curl, and verify. Encoded strings carry
+  // their own, so we send null and let the backend read them from the string.
+  const kdf = {
+    salt: isEncoded ? null : salt.trim(),
+    iterations: isEncoded ? null : Number(iterations),
+    prf,
+  }
+
   const mutation = useMutation({
-    mutationFn: () =>
-      crackHash(trimmed, {
-        algorithm: 'pbkdf2',
-        salt: isEncoded ? null : salt.trim(),
-        iterations: isEncoded ? null : Number(iterations),
-        prf,
-        ...opts.crackParams,
-      }),
+    mutationFn: () => crackHash(trimmed, { algorithm: 'pbkdf2', ...kdf, ...opts.crackParams }),
   })
 
   const canSubmit = isValid && !mutation.isPending
@@ -164,6 +165,7 @@ function Pbkdf2Tab() {
         copied={copied}
         showAssistant={showAssistant}
         setShowAssistant={setShowAssistant}
+        curl={isValid ? curlForCrack(trimmed, { algorithm: 'pbkdf2', ...kdf, ...opts.crackParams }) : undefined}
         loadingMessage="Deriving keys for each candidate… PBKDF2 is slow, so this can take a while."
         notFoundTip={
           <>
@@ -173,6 +175,10 @@ function Pbkdf2Tab() {
           </>
         }
       />
+
+      {isValid && (
+        <VerifyBox hash={trimmed} algorithm="pbkdf2" salt={kdf.salt} iterations={kdf.iterations} prf={prf} />
+      )}
 
       {isValid && showAssistant && (
         <AssistantPanel
