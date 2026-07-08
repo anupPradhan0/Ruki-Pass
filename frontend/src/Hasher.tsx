@@ -41,7 +41,7 @@ function Hasher() {
     <section className="panel">
       <h2 className="panel-title">Make a hash</h2>
       <p className="panel-subtitle">
-        Type a password, pick an algorithm, and get its hash — the reverse of cracking.
+        Type a password, pick an algorithm, and get its hash.
       </p>
 
       <div className="tabs" role="tablist">

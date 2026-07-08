@@ -12,7 +12,10 @@ const REPO_URL = 'https://github.com/Ruki111/Ruki-Pass'
 const TABS = [
   { algorithm: 'md5', label: 'MD5', hexLength: 32 },
   { algorithm: 'sha1', label: 'SHA-1', hexLength: 40 },
+  { algorithm: 'sha224', label: 'SHA-224', hexLength: 56 },
   { algorithm: 'sha256', label: 'SHA-256', hexLength: 64 },
+  { algorithm: 'sha384', label: 'SHA-384', hexLength: 96 },
+  { algorithm: 'sha512', label: 'SHA-512', hexLength: 128 },
   // PBKDF2 and bcrypt are salted + iterated, so they use their own tab
   // components (not the plain hex-hash CrackerTab). hexLength is unused for them.
   { algorithm: 'pbkdf2', label: 'PBKDF2', hexLength: 0 },

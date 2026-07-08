@@ -16,7 +16,10 @@ type Props = {
 const EXAMPLE_HASHES: Record<string, string> = {
   md5: '6ad14ba9986e3615423dfca256d04e3f',
   sha1: '5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8', // sha1("password")
+  sha224: 'd63dc919e201d7bc4c825630d2cf25fdc93d4b2f0d46706d29038d01', // sha224("password")
   sha256: '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', // sha256("password")
+  sha384: 'a8b64babd0aca91a59bdbb7761b421d4f2bb38280d3a75ba0f21f2bebc45583d446c598660c94ce680c47d19c30783a7', // sha384("password")
+  sha512: 'b109f3bbbc244eb82441917ed06d618b9008dd09b3befd1b5e07394c706a8bb980b1d7785e5976ec049b46df5f1326af5a2ea6d103fd07c95385ffab0cacbc86', // sha512("password")
 }
 
 function CrackerTab({ algorithm, hexLength }: Props) {
