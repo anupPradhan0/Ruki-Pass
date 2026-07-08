@@ -1,7 +1,12 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { hashText, HASHABLE } from './api'
-import Dropdown from './Dropdown'
+
+// 'sha256' -> 'SHA-256'; everything else (md5, bcrypt, pbkdf2) is just
+// uppercased by the .tab CSS itself.
+function algoLabel(algo: string): string {
+  return algo.startsWith('sha') ? `SHA-${algo.slice(3)}` : algo
+}
 
 function Hasher() {
   const [text, setText] = useState('')
@@ -36,8 +41,23 @@ function Hasher() {
     <section className="panel">
       <h2 className="panel-title">Make a hash</h2>
       <p className="panel-subtitle">
-        Type a password, pick an algorithm, and get its hash — the reverse of cracking.
+        Type a password, pick an algorithm, and get its hash.
       </p>
+
+      <div className="tabs" role="tablist">
+        {HASHABLE.map((a) => (
+          <button
+            key={a}
+            type="button"
+            role="tab"
+            aria-selected={algorithm === a}
+            className={`tab ${algorithm === a ? 'active' : ''}`}
+            onClick={() => setAlgorithm(a)}
+          >
+            {algoLabel(a)}
+          </button>
+        ))}
+      </div>
 
       <form onSubmit={onSubmit} className="cracker-form">
         <div className="field">
@@ -58,15 +78,6 @@ function Hasher() {
                 ×
               </button>
             )}
-          </div>
-        </div>
-
-        <div className="brute-options">
-          <div className="brute-row">
-            <div className="brute-field">
-              <span>Algorithm</span>
-              <Dropdown value={algorithm} onChange={setAlgorithm} options={HASHABLE} />
-            </div>
           </div>
         </div>
 
